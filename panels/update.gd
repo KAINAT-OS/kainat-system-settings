@@ -31,7 +31,7 @@ func build() -> void:
 	
 	_sources_list = ItemList.new()
 	_sources_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_sources_list.custom_minimum_height = 250
+	_sources_list.custom_minimum_size = Vector2(0, 250)
 	c.add_child(_sources_list)
 	
 	var actions := HBoxContainer.new()
@@ -39,13 +39,11 @@ func build() -> void:
 	
 	var add_btn := Button.new()
 	add_btn.text = "+ Add Repository"
-	add_btn.icon = theme.get_icon("Add", "EditorIcons") if theme.has_icon("Add", "EditorIcons") else null
 	add_btn.pressed.connect(_on_add_repo)
 	actions.add_child(add_btn)
 	
 	var refresh_btn := Button.new()
 	refresh_btn.text = "Refresh"
-	refresh_btn.icon = theme.get_icon("Reload", "EditorIcons") if theme.has_icon("Reload", "EditorIcons") else null
 	refresh_btn.pressed.connect(_refresh_sources)
 	actions.add_child(refresh_btn)
 	
@@ -63,17 +61,19 @@ func _refresh_sources() -> void:
 	
 	var sources := Sh.list_apt_sources()
 	for src in sources:
-		var name := src["name"]
-		var enabled := src["enabled"]
-		var icon := "✅" if enabled else "⏸️"
-		_sources_list.add_item(icon + " " + name, {"file": src["file"], "enabled": enabled})
-	
+		var src_name: String = str(src.get("name", ""))
+		var src_enabled: bool = bool(src.get("enabled", false))
+		var icon := "✅" if src_enabled else "⏸️"
+		_sources_list.add_item(icon + " " + src_name)
+		_sources_list.set_item_metadata(_sources_list.item_count - 1, {"file": str(src.get("file", "")), "enabled": src_enabled})
+
 	# Also show main sources.list
 	var main_content := Sh.read_text("/etc/apt/sources.list")
 	if not main_content.strip_edges().is_empty():
-		var enabled := not main_content.begins_with("#")
-		var icon := "✅" if enabled else "⏸️"
-		_sources_list.add_item(icon + " sources.list (main)", {"file": "/etc/apt/sources.list", "enabled": enabled, "is_main": true})
+		var main_enabled := not main_content.begins_with("#")
+		var main_icon := "✅" if main_enabled else "⏸️"
+		_sources_list.add_item(main_icon + " sources.list (main)")
+		_sources_list.set_item_metadata(_sources_list.item_count - 1, {"file": "/etc/apt/sources.list", "enabled": main_enabled, "is_main": true})
 
 
 func _on_add_repo() -> void:
@@ -90,35 +90,40 @@ func _on_add_repo() -> void:
 	vbox.add_child(repo_edit)
 	dialog.add_child(vbox)
 	
-	if dialog.popup() == OK:
+	dialog.confirmed.connect(func() -> void:
 		var line := repo_edit.text.strip_edges()
 		if line.is_empty() or not line.begins_with("deb "):
 			notify("Invalid repository format. Must start with 'deb '")
 			return
-		
+
 		# Create a new .list file
-		var name := "custom-" + str(OS.get_unix_time())
+		var name := "custom-" + str(int(Time.get_unix_time_from_system()))
 		var path := "/etc/apt/sources.list.d/" + name + ".list"
 		var code := Sh.run_wait("pkexec sh -c 'printf %s " + Sh.quote(line + "\n") + " > " + Sh.quote(path) + "'")
-		
+
 		if code == 0:
 			notify("Repository added. Running apt update...")
 			Sh.run("pkexec apt-get update")
 			_refresh_sources()
 		else:
-			notify("Failed to add repository.")
+			notify("Failed to add repository."))
+	get_tree().root.add_child(dialog)
+	dialog.popup_centered()
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.canceled.connect(dialog.queue_free)
 
 
 func _on_repo_toggled(idx: int) -> void:
-	var item_data := _sources_list.get_item_metadata(idx)
-	var file := item_data["file"]
-	var enabled := item_data["enabled"]
-	
+	var item_data: Dictionary = _sources_list.get_item_metadata(idx)
+	var file: String = str(item_data.get("file", ""))
+	var enabled: bool = bool(item_data.get("enabled", false))
+
 	var new_enabled := not enabled
 	var code := Sh.toggle_apt_source(file, new_enabled)
-	
+
 	if code == 0:
-		notify("Repository " + (new_enabled ? "enabled" : "disabled") + ". Running apt update...")
+		var state_text := "enabled" if new_enabled else "disabled"
+		notify("Repository " + state_text + ". Running apt update...")
 		Sh.run("pkexec apt-get update")
 		_refresh_sources()
 	else:

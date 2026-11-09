@@ -233,29 +233,38 @@ func _run_diagnostics() -> void:
 	dialog.text = output.strip_edges()
 	dialog.ok_text = "OK"
 	dialog.min_size = Vector2(500, 400)
+	get_tree().root.add_child(dialog)
 	dialog.popup_centered()
+	dialog.confirmed.connect(dialog.queue_free)
 
 
 func _reset_settings() -> void:
-	var dialog := AcceptDialog.new()
+	var dialog := ConfirmationDialog.new()
 	dialog.title = "Reset System Settings?"
 	dialog.text = "This will delete your user configuration files:\n• ~/.config/*\n• ~/.local/share/config/*\n\nYour personal files (Documents, Downloads, Pictures, etc.) will NOT be touched.\n\nYou will need to log out and back in for changes to take full effect."
 	dialog.ok_text = "Reset Settings"
 	dialog.add_cancel_button("Cancel")
 	
-	if dialog.popup() == OK:
-		notify("Resetting settings... Please wait.")
-		var code := Sh.reset_user_settings()
-		if code == 0:
-			notify("Settings reset complete. Please log out and back in.")
-		else:
-			notify("Reset completed with some errors. Check terminal.")
+	add_child(dialog)
+	dialog.popup_centered()
+	dialog.confirmed.connect(_on_reset_confirmed.bind(dialog))
+
+
+func _on_reset_confirmed(dialog: ConfirmationDialog) -> void:
+	dialog.queue_free()
+	notify("Resetting settings... Please wait.")
+	var code := Sh.reset_user_settings()
+	if code == 0:
+		notify("Settings reset complete. Please log out and back in.")
+	else:
+		notify("Reset completed with some errors. Check terminal.")
 
 
 func _collect_logs() -> void:
 	notify("Collecting system logs...")
 	
-	var log_dir := Sh.home() + "/kainat-logs-" + str(OS.get_unix_time())
+	var log_dir := Sh.home() + "/kainat-logs-" + str(Time.get_unix_time_from_system())
+	_last_log_dir = log_dir
 	Sh.run("mkdir -p " + Sh.quote(log_dir))
 	
 	Sh.run("journalctl --no-pager > " + Sh.quote(log_dir + "/journalctl.log") + " 2>&1")
@@ -274,5 +283,15 @@ func _collect_logs() -> void:
 	dialog.text = "System logs saved to:\n" + log_dir + "\n\nYou can attach these when reporting issues."
 	dialog.ok_text = "Open Folder"
 	dialog.add_cancel_button("Close")
-	if dialog.popup() == OK:
-		Sh.run("xdg-open " + Sh.quote(log_dir))
+	
+	add_child(dialog)
+	dialog.popup_centered()
+	dialog.confirmed.connect(_on_logs_confirmed.bind(dialog))
+
+
+func _on_logs_confirmed(dialog: AcceptDialog) -> void:
+	dialog.queue_free()
+	Sh.run("xdg-open " + Sh.quote(_last_log_dir))
+
+
+var _last_log_dir: String = ""

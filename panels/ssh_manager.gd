@@ -48,7 +48,6 @@ func _build_ui() -> void:
 	
 	var gen_btn := Button.new()
 	gen_btn.text = "Generate"
-	gen_btn.icon = theme.get_icon("Play", "EditorIcons") if theme.has_icon("Play", "EditorIcons") else null
 	gen_btn.pressed.connect(_on_generate.bind(key_name, key_type))
 	gen_row.add_child(gen_btn)
 	
@@ -60,7 +59,7 @@ func _build_ui() -> void:
 	
 	_key_list = ItemList.new()
 	_key_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_key_list.custom_minimum_height = 250
+	_key_list.custom_minimum_size = Vector2(0, 250)
 	_key_list.item_selected.connect(_on_key_selected)
 	c.add_child(_key_list)
 	
@@ -70,7 +69,6 @@ func _build_ui() -> void:
 	
 	var copy_btn := Button.new()
 	copy_btn.text = "Copy Public Key"
-	copy_btn.icon = theme.get_icon("ActionCopy", "EditorIcons") if theme.has_icon("ActionCopy", "EditorIcons") else null
 	copy_btn.disabled = true
 	copy_btn.name = "copy_btn"
 	copy_btn.pressed.connect(_on_copy_key)
@@ -142,7 +140,8 @@ func _refresh_keys() -> void:
 			elif pub_content.begins_with("ecdsa-sha2"):
 				key_type = "ECDSA"
 			
-			_key_list.add_item("🔑 " + file + " (" + key_type + ")", {"file": file, "path": _ssh_dir + file})
+			_key_list.add_item("🔑 " + file + " (" + key_type + ")")
+			_key_list.set_item_metadata(_key_list.item_count - 1, {"file": file, "path": _ssh_dir + file})
 
 
 func _on_generate(key_name_edit: LineEdit, key_type_box: OptionButton) -> void:
@@ -159,8 +158,8 @@ func _on_generate(key_name_edit: LineEdit, key_type_box: OptionButton) -> void:
 		notify("Key already exists: " + name)
 		return
 	
-	var key_type_map := ["ed25519", "rsa", "ecdsa"]
-	var key_type := key_type_map[key_type_box.selected]
+	var key_type_map: Array[String] = ["ed25519", "rsa", "ecdsa"]
+	var key_type: String = key_type_map[key_type_box.selected]
 	
 	notify("Generating " + key_type + " key: " + name + "...")
 	var code := Sh.generate_ssh_key(key_path, key_type)
@@ -192,14 +191,14 @@ func _on_copy_key() -> void:
 	if idx.is_empty():
 		return
 	
-	var idx_val := idx[0]
-	var item_data := _key_list.get_item_metadata(idx_val)
-	var pub_key := Sh.get_ssh_public_key(item_data["path"])
-	
+	var idx_val: int = idx[0]
+	var item_data: Dictionary = _key_list.get_item_metadata(idx_val)
+	var pub_key := Sh.get_ssh_public_key(str(item_data.get("path", "")))
+
 	if pub_key.is_empty():
 		notify("Could not read public key")
 		return
-	
+
 	DisplayServer.clipboard_set(pub_key)
 	notify("Public key copied to clipboard!")
 
@@ -209,20 +208,22 @@ func _on_view_key() -> void:
 	if idx.is_empty():
 		return
 	
-	var idx_val := idx[0]
-	var item_data := _key_list.get_item_metadata(idx_val)
-	var pub_key := Sh.get_ssh_public_key(item_data["path"])
-	
+	var idx_val: int = idx[0]
+	var item_data: Dictionary = _key_list.get_item_metadata(idx_val)
+	var pub_key := Sh.get_ssh_public_key(str(item_data.get("path", "")))
+
 	if pub_key.is_empty():
 		notify("Could not read public key")
 		return
-	
+
 	var dialog := AcceptDialog.new()
-	dialog.title = "Public Key: " + item_data["file"]
+	dialog.title = "Public Key: " + str(item_data.get("file", ""))
 	dialog.text = pub_key
 	dialog.ok_text = "Close"
 	dialog.min_size = Vector2(600, 200)
+	get_tree().root.add_child(dialog)
 	dialog.popup_centered()
+	dialog.confirmed.connect(dialog.queue_free)
 
 
 func _on_remove_key() -> void:
@@ -230,18 +231,23 @@ func _on_remove_key() -> void:
 	if idx.is_empty():
 		return
 	
-	var idx_val := idx[0]
-	var item_data := _key_list.get_item_metadata(idx_val)
-	var name := item_data["file"]
-	
+	var idx_val: int = idx[0]
+	var item_data: Dictionary = _key_list.get_item_metadata(idx_val)
+	var name: String = str(item_data.get("file", ""))
+	var key_path: String = str(item_data.get("path", ""))
+
 	var dialog := AcceptDialog.new()
 	dialog.title = "Remove Key?"
 	dialog.text = "Permanently delete " + name + " and " + name + ".pub?\n\nThis cannot be undone."
 	dialog.ok_text = "Delete"
-	if dialog.popup() == OK:
-		Sh.run("rm " + Sh.quote(item_data["path"]) + " " + Sh.quote(item_data["path"] + ".pub"))
+	dialog.confirmed.connect(func() -> void:
+		Sh.run("rm " + Sh.quote(key_path) + " " + Sh.quote(key_path + ".pub"))
 		notify("Deleted " + name)
-		_refresh_keys()
+		_refresh_keys())
+	get_tree().root.add_child(dialog)
+	dialog.popup_centered()
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.canceled.connect(dialog.queue_free)
 
 
 func _on_github() -> void:

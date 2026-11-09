@@ -33,13 +33,11 @@ func _build_ui() -> void:
 	# Framework selector
 	section("Input Method Framework")
 	var c := card()
-	
-	var framework_box := OptionButton.new()
-	framework_box.add_item("Fcitx5 (Recommended for KDE)")
-	framework_box.add_item("IBus (GNOME default)")
-	framework_box.selected = 0 if _installed_engines["fcitx5"] else 1
-	
-	action_row(c, "Input Framework", "Choose the input method framework.", "F", framework_box)
+
+	action_row(c, "Input Framework", "Choose the input method framework.", "F", "Select", func() -> void:
+		var fw: String = "fcitx5" if _installed_engines["fcitx5"] else "ibus"
+		Sh.set_input_method_framework(fw)
+		notify("Input framework set to " + fw + ". Log out and back in to apply."))
 	
 	# Chinese (Simplified) - Pinyin
 	section("Chinese (Simplified) / 中文 (简体)")

@@ -25,14 +25,13 @@ func _build_ui() -> void:
 	# Add VPN button
 	var add_btn := Button.new()
 	add_btn.text = "+ Add VPN Config"
-	add_btn.icon = theme.get_icon("Add", "EditorIcons") if theme.has_icon("Add", "EditorIcons") else null
 	add_btn.pressed.connect(_on_add_vpn)
 	c.add_child(add_btn)
 	
 	# VPN List
 	_vpn_list = ItemList.new()
 	_vpn_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_vpn_list.custom_minimum_height = 300
+	_vpn_list.custom_minimum_size = Vector2(0, 300)
 	_vpn_list.item_selected.connect(_on_vpn_selected)
 	c.add_child(_vpn_list)
 	
@@ -42,7 +41,6 @@ func _build_ui() -> void:
 	
 	var connect_btn := Button.new()
 	connect_btn.text = "Connect"
-	connect_btn.icon = theme.get_icon("Play", "EditorIcons") if theme.has_icon("Play", "EditorIcons") else null
 	connect_btn.disabled = true
 	connect_btn.name = "connect_btn"
 	connect_btn.pressed.connect(_on_connect)
@@ -50,7 +48,6 @@ func _build_ui() -> void:
 	
 	var disconnect_btn := Button.new()
 	disconnect_btn.text = "Disconnect"
-	disconnect_btn.icon = theme.get_icon("Stop", "EditorIcons") if theme.has_icon("Stop", "EditorIcons") else null
 	disconnect_btn.disabled = true
 	disconnect_btn.name = "disconnect_btn"
 	disconnect_btn.pressed.connect(_on_disconnect)
@@ -58,7 +55,6 @@ func _build_ui() -> void:
 	
 	var remove_btn := Button.new()
 	remove_btn.text = "Remove"
-	remove_btn.icon = theme.get_icon("Remove", "EditorIcons") if theme.has_icon("Remove", "EditorIcons") else null
 	remove_btn.disabled = true
 	remove_btn.name = "remove_btn"
 	remove_btn.flat = true
@@ -73,27 +69,32 @@ func _build_ui() -> void:
 	c.add_child(status_label)
 
 
+func _add_vpn_item(text: String, meta: Dictionary) -> void:
+	_vpn_list.add_item(text)
+	_vpn_list.set_item_metadata(_vpn_list.item_count - 1, meta)
+
+
 func _refresh_list() -> void:
 	_vpn_list.clear()
-	
+
 	# OpenVPN configs
 	var ovpn_files := Sh.list_vpn_configs(_config_dir)
 	for file in ovpn_files:
-		_vpn_list.add_item("🔐 " + file, {"type": "openvpn", "file": file})
-	
+		_add_vpn_item("🔐 " + str(file), {"type": "openvpn", "file": str(file)})
+
 	# WireGuard configs (nmcli)
 	var wg_conns := Sh.run_lines("nmcli -t -f NAME,TYPE con show | grep wireguard | cut -d: -f1")
 	for conn in wg_conns:
 		var stripped := conn.strip_edges()
 		if not stripped.is_empty():
-			_vpn_list.add_item("🔒 " + stripped, {"type": "wireguard", "name": stripped})
-	
+			_add_vpn_item("🔒 " + stripped, {"type": "wireguard", "name": stripped})
+
 	# Other VPN types
 	var other_conns := Sh.run_lines("nmcli -t -f NAME,TYPE con show | grep -E 'vpn|openvpn' | grep -v wireguard | cut -d: -f1")
 	for conn in other_conns:
 		var stripped := conn.strip_edges()
 		if not stripped.is_empty():
-			_vpn_list.add_item("🌐 " + stripped, {"type": "nm", "name": stripped})
+			_add_vpn_item("🌐 " + stripped, {"type": "nm", "name": stripped})
 
 
 func _on_vpn_selected(idx: int) -> void:
@@ -106,7 +107,6 @@ func _on_vpn_selected(idx: int) -> void:
 		connect_btn.disabled = false
 		disconnect_btn.disabled = false
 		remove_btn.disabled = false
-		var item_data := _vpn_list.get_item_metadata(idx)
 		status_label.text = "Selected: " + _vpn_list.get_item_text(idx)
 	else:
 		connect_btn.disabled = true
@@ -122,7 +122,10 @@ func _on_add_vpn() -> void:
 	dialog.filters = ["*.ovpn", "*.conf", "*.conf"]
 	dialog.current_dir = Sh.home()
 	dialog.file_selected.connect(_on_vpn_file_selected)
+	get_tree().root.add_child(dialog)
 	dialog.popup_centered()
+	dialog.file_selected.connect(dialog.queue_free)
+	dialog.canceled.connect(dialog.queue_free)
 
 
 func _on_vpn_file_selected(path: String) -> void:
@@ -138,18 +141,18 @@ func _on_connect() -> void:
 	if idx.is_empty():
 		return
 	
-	var idx_val := idx[0]
-	var item_data := _vpn_list.get_item_metadata(idx_val)
+	var idx_val: int = idx[0]
+	var item_data: Dictionary = _vpn_list.get_item_metadata(idx_val)
 	var name := _vpn_list.get_item_text(idx_val)
-	
+
 	notify("Connecting to " + name + "...")
-	
+
 	var code: int
-	if item_data["type"] == "openvpn":
-		var config_path := _config_dir + item_data["file"]
+	if str(item_data.get("type", "")) == "openvpn":
+		var config_path: String = _config_dir + str(item_data.get("file", ""))
 		code = Sh.start_openvpn(config_path)
-	elif item_data["type"] == "wireguard" or item_data["type"] == "nm":
-		code = Sh.run_wait("nmcli con up " + Sh.quote(item_data["name"]))
+	elif str(item_data.get("type", "")) == "wireguard" or str(item_data.get("type", "")) == "nm":
+		code = Sh.run_wait("nmcli con up " + Sh.quote(str(item_data.get("name", ""))))
 	
 	if code == 0:
 		notify("Connected to " + name)
@@ -163,18 +166,18 @@ func _on_disconnect() -> void:
 	if idx.is_empty():
 		return
 	
-	var idx_val := idx[0]
-	var item_data := _vpn_list.get_item_metadata(idx_val)
+	var idx_val: int = idx[0]
+	var item_data: Dictionary = _vpn_list.get_item_metadata(idx_val)
 	var name := _vpn_list.get_item_text(idx_val)
-	
+
 	notify("Disconnecting " + name + "...")
-	
+
 	var code: int
-	if item_data["type"] == "openvpn":
+	if str(item_data.get("type", "")) == "openvpn":
 		Sh.stop_openvpn()
 		code = 0
-	elif item_data["type"] == "wireguard" or item_data["type"] == "nm":
-		code = Sh.run_wait("nmcli con down " + Sh.quote(item_data["name"]))
+	elif str(item_data.get("type", "")) == "wireguard" or str(item_data.get("type", "")) == "nm":
+		code = Sh.run_wait("nmcli con down " + Sh.quote(str(item_data.get("name", ""))))
 	
 	if code == 0:
 		notify("Disconnected " + name)
@@ -187,18 +190,22 @@ func _on_remove() -> void:
 	if idx.is_empty():
 		return
 	
-	var idx_val := idx[0]
-	var item_data := _vpn_list.get_item_metadata(idx_val)
+	var idx_val: int = idx[0]
+	var item_data: Dictionary = _vpn_list.get_item_metadata(idx_val)
 	var name := _vpn_list.get_item_text(idx_val)
-	
+
 	var dialog := AcceptDialog.new()
 	dialog.title = "Remove VPN?"
 	dialog.text = "Remove " + name + " from the list?\n\nConfig files will be deleted."
 	dialog.ok_text = "Remove"
-	if dialog.popup() == OK:
-		if item_data["type"] == "openvpn":
-			Sh.run("rm " + Sh.quote(_config_dir + item_data["file"]))
-		elif item_data["type"] == "wireguard" or item_data["type"] == "nm":
-			Sh.run_wait("nmcli con delete " + Sh.quote(item_data["name"]))
+	dialog.confirmed.connect(func() -> void:
+		if str(item_data.get("type", "")) == "openvpn":
+			Sh.run("rm " + Sh.quote(_config_dir + str(item_data.get("file", ""))))
+		elif str(item_data.get("type", "")) == "wireguard" or str(item_data.get("type", "")) == "nm":
+			Sh.run_wait("nmcli con delete " + Sh.quote(str(item_data.get("name", ""))))
 		notify("Removed " + name)
-		_refresh_list()
+		_refresh_list())
+	get_tree().root.add_child(dialog)
+	dialog.popup_centered()
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.canceled.connect(dialog.queue_free)

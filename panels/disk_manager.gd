@@ -25,7 +25,7 @@ func _populate() -> void:
 	
 	var devices := Sh.list_block_devices()
 	if devices.is_empty():
-		unavailable_row(content, "Could not read block devices.")
+		unavailable_row(content, "Storage devices", "Could not read block devices.")
 		return
 	
 	for dev in devices:
@@ -80,7 +80,7 @@ func _build_disk_card(dev: Dictionary) -> void:
 			bar.value = percent
 			bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			var usage_text := Label.new()
-			usage_text.text = "Usage: " + usage["used"] + " / " + usage["total"] + " (" + str(percent) + "%)"
+			usage_text.text = "Usage: %s / %s (%d%%)" % [str(usage["used"]), str(usage["total"]), percent]
 			title_vbox.add_child(usage_text)
 			title_vbox.add_child(bar)
 	
@@ -120,14 +120,18 @@ func _on_eject(device: String) -> void:
 	dialog.title = "Eject " + device + "?"
 	dialog.text = "This will unmount all partitions and power off the device.\n\nAre you sure?"
 	dialog.ok_text = "Eject"
-	if dialog.popup() == OK:
+	dialog.confirmed.connect(func() -> void:
 		notify("Ejecting " + device + "...")
 		var code := Sh.eject_drive(device)
 		if code == 0:
 			notify(device + " ejected safely. You may remove it.")
 			_populate()  # Refresh
 		else:
-			notify("Failed to eject " + device)
+			notify("Failed to eject " + device))
+	get_tree().root.add_child(dialog)
+	dialog.popup_centered()
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.canceled.connect(dialog.queue_free)
 
 
 func _on_format(device: String, size: String) -> void:
@@ -145,20 +149,26 @@ func _on_format(device: String, size: String) -> void:
 	fs_box.selected = 0
 	
 	var vbox := VBoxContainer.new()
-	vbox.add_child(Label.new().set_text("Filesystem:"))
+	var fs_label := Label.new()
+	fs_label.text = "Filesystem:"
+	vbox.add_child(fs_label)
 	vbox.add_child(fs_box)
 	dialog.add_child(vbox)
-	
-	if dialog.popup() == OK:
-		var fs_map := {"vfat", "ntfs", "ext4"}
-		var fs := fs_map[fs_box.selected]
+
+	dialog.confirmed.connect(func() -> void:
+		var fs_map: Array[String] = ["vfat", "ntfs", "ext4"]
+		var fs: String = fs_map[fs_box.selected]
 		notify("Formatting " + device + " as " + fs + "...")
 		var code := Sh.format_drive(device, fs)
 		if code == 0:
 			notify(device + " formatted successfully as " + fs)
 			_populate()
 		else:
-			notify("Format failed. Is the drive in use?")
+			notify("Format failed. Is the drive in use?"))
+	get_tree().root.add_child(dialog)
+	dialog.popup_centered()
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.canceled.connect(dialog.queue_free)
 
 
 func _on_health(device: String) -> void:
@@ -168,6 +178,8 @@ func _on_health(device: String) -> void:
 	
 	var result_dialog := AcceptDialog.new()
 	result_dialog.title = "SMART Health: " + device
-	result_dialog.text = output.strip_edges().is_empty() ? "Could not read SMART data." : output
+	result_dialog.text = "Could not read SMART data." if output.strip_edges().is_empty() else output
 	result_dialog.ok_text = "OK"
-	result_dialog.popup()
+	get_tree().root.add_child(result_dialog)
+	result_dialog.popup_centered()
+	result_dialog.confirmed.connect(result_dialog.queue_free)

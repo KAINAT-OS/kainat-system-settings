@@ -1,9 +1,14 @@
+extends RefCounted
 class_name KainatShell
 # KainatShell.gd
 # Small helper layer for interacting with the Debian/Kainat OS system from
 # GDScript panels. Keeps every panel free of shell-quoting boilerplate.
 #
 # All helpers are static so panels can call them without an instance.
+#
+# NOTE: this is a library, not an entry point. Run the project
+# (main-panel.tscn); launching this file directly (editor F6 / --script)
+# reports "doesn't inherit from SceneTree or MainLoop" by design.
 
 const KCM_FALLBACK_TOOLS: Array[String] = ["kcmshell6", "kcmshell5", "kcmshell", "systemsettings"]
 
@@ -423,10 +428,12 @@ static func list_block_devices() -> Array:
 	# Returns array of dicts with: name, mountpoint, size, type, children
 	var output: String = run_capture("lsblk -o NAME,MOUNTPOINT,SIZE,TYPE -n -J")
 	var json: JSON = JSON.new()
-	var result := json.parse_string(output)
-	if json.has_error():
+	var err: int = json.parse(output)
+	if err != OK:
 		return []
-	return result.get("blockdevices", [])
+	var data: Variant = json.data
+	var devices: Array = data.get("blockdevices", []) if data is Dictionary else []
+	return devices
 
 
 static func get_disk_usage(mountpoint: String) -> Dictionary:
@@ -621,19 +628,42 @@ static func get_high_contrast() -> bool:
 	return val == "true"
 
 
+# --- input method helpers ---------------------------------------------------
+
+static func set_input_method_framework(framework: String) -> void:
+	var fw := framework.strip_edges()
+	if fw != "fcitx5" and fw != "ibus":
+		fw = "fcitx5"
+	kde_write("kdeglobals", "KDE", "IMModule", fw)
+	var dir := home() + "/.config/environment.d"
+	if not dir_exists(dir):
+		DirAccess.make_dir_recursive_absolute(dir)
+	var file := FileAccess.open(dir + "/90-input-method.conf", FileAccess.WRITE)
+	if file != null:
+		var xmod := "@im=fcitx" if fw == "fcitx5" else "@im=ibus"
+		file.store_line("GTK_IM_MODULE=" + fw)
+		file.store_line("QT_IM_MODULE=" + fw)
+		file.store_line("XMODIFIERS=" + xmod)
+		file.close()
+
+
 # --- diagnostics helpers ----------------------------------------------------
 
 static func get_cpu_temp() -> int:
-	var output: String = run_capture("sensors 2>/dev/null | grep -i 'package id 0:' | head -1 | awk '{print \$4}' | cut -d'+' -f2 | cut -d'.' -f1")
+	# Use raw string to avoid escape issues with the complex awk command
+	var cmd: String = "sensors 2>/dev/null | grep -i 'package id 0:' | head -1 | awk '{print $4}' | cut -d'+' -f2 | cut -d'.' -f1"
+	var output: String = run_capture(cmd)
 	if output.is_empty():
 		# Fallback to /sys
-		var paths := DirAccess.get_directories("/sys/class/hwmon")
-		for p in paths:
-			var label := read_text("/sys/class/hwmon/" + p + "/name").strip_edges()
-			if "coretemp" in label or "k10temp" in label:
-				var temp_str := read_text("/sys/class/hwmon/" + p + "/temp1_input").strip_edges()
-				if temp_str.is_valid_number():
-					return int(temp_str) / 1000
+		var hwmon_dir := DirAccess.open("/sys/class/hwmon")
+		if hwmon_dir:
+			var paths := hwmon_dir.get_directories()
+			for p in paths:
+				var label := read_text("/sys/class/hwmon/" + p + "/name").strip_edges()
+				if "coretemp" in label or "k10temp" in label:
+					var temp_str := read_text("/sys/class/hwmon/" + p + "/temp1_input").strip_edges()
+					if temp_str.is_valid_int():
+						return int(temp_str) / 1000
 		return -1
 	return int(output.strip_edges())
 
@@ -653,5 +683,6 @@ static func get_ram_usage() -> Dictionary:
 
 static func get_disk_health() -> String:
 	# Check root partition
-	var output: String = run_capture("df -h / | tail -1 | awk '{print \$5}'").strip_edges()
+	var cmd: String = "df -h / | tail -1 | awk '{print $5}'"
+	var output: String = run_capture(cmd).strip_edges()
 	return output

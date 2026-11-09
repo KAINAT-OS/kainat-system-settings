@@ -31,7 +31,7 @@ func _build_static() -> void:
 	section("VPN")
 	c = card()
 	action_row(c, "VPN Manager", "Manage OpenVPN and WireGuard connections.", "V", "Open VPN Manager", func() -> void:
-		Sh._virtual_press_button("vpn_manager")
+		_open_page("vpn_manager")
 	)
 	kcm_row(c, "VPN Settings (KDE)", "Configure VPN via KDE.", "V", "kcm_vpn")
 	
@@ -61,11 +61,17 @@ func _build_static() -> void:
 	_proxy_mode.item_selected.connect(_on_proxy_mode_changed)
 	
 	var proxy_row := HBoxContainer.new()
-	proxy_row.add_child(Label.new().set_text("Mode:"))
+	var mode_label := Label.new()
+	mode_label.text = "Mode:"
+	proxy_row.add_child(mode_label)
 	proxy_row.add_child(_proxy_mode)
-	proxy_row.add_child(Label.new().set_text("Host:"))
+	var host_label := Label.new()
+	host_label.text = "Host:"
+	proxy_row.add_child(host_label)
 	proxy_row.add_child(_proxy_host)
-	proxy_row.add_child(Label.new().set_text("Port:"))
+	var port_label := Label.new()
+	port_label.text = "Port:"
+	proxy_row.add_child(port_label)
 	proxy_row.add_child(_proxy_port)
 	c.add_child(proxy_row)
 	
@@ -99,15 +105,21 @@ func _build_static() -> void:
 	kcm_row(c, "Web Shortcuts", "Search keywords for web services.", "U", "kcm_webshortcuts")
 
 
+func _open_page(page_name: String) -> void:
+	var menu: Node = get_tree().root.find_child("menu-buttons", true, false)
+	if menu and menu.has_method("virtual_press_button"):
+		menu.virtual_press_button(page_name)
+
+
 func _on_proxy_mode_changed(idx: int) -> void:
-	var visible := idx == 1
-	_proxy_host.visible = visible
-	_proxy_port.visible = visible
+	var manual: bool = idx == 1
+	_proxy_host.visible = manual
+	_proxy_port.visible = manual
 
 
 func _apply_proxy() -> void:
-	var mode_map := ["none", "manual", "auto"]
-	var mode := mode_map[_proxy_mode.selected]
+	var mode_map: Array[String] = ["none", "manual", "auto"]
+	var mode: String = mode_map[_proxy_mode.selected]
 	var host := _proxy_host.text.strip_edges()
 	var port := _proxy_port.text.strip_edges()
 	
@@ -124,7 +136,7 @@ func _create_hotspot() -> void:
 	
 	var ssid_edit := LineEdit.new()
 	ssid_edit.placeholder_text = "Kainat-Hotspot"
-	ssid_edit.text = "Kainat-" + str(OS.get_unix_time() % 10000)
+	ssid_edit.text = "Kainat-" + str(int(Time.get_unix_time_from_system()) % 10000)
 	
 	var pass_edit := LineEdit.new()
 	pass_edit.placeholder_text = "Minimum 8 characters"
@@ -132,26 +144,34 @@ func _create_hotspot() -> void:
 	pass_edit.secret = true
 	
 	var vbox := VBoxContainer.new()
-	vbox.add_child(Label.new().set_text("SSID:"))
+	var ssid_label := Label.new()
+	ssid_label.text = "SSID:"
+	vbox.add_child(ssid_label)
 	vbox.add_child(ssid_edit)
-	vbox.add_child(Label.new().set_text("Password:"))
+	var pass_label := Label.new()
+	pass_label.text = "Password:"
+	vbox.add_child(pass_label)
 	vbox.add_child(pass_edit)
 	dialog.add_child(vbox)
-	
-	if dialog.popup() == OK:
+
+	dialog.confirmed.connect(func() -> void:
 		var ssid := ssid_edit.text.strip_edges()
-		var pass := pass_edit.text.strip_edges()
-		
-		if ssid.is_empty() or pass.length() < 8:
+		var password := pass_edit.text.strip_edges()
+
+		if ssid.is_empty() or password.length() < 8:
 			notify("SSID required, password must be 8+ chars")
 			return
-		
+
 		notify("Creating hotspot...")
-		var code := Sh.create_wifi_hotspot(ssid, pass)
+		var code := Sh.create_wifi_hotspot(ssid, password)
 		if code == 0:
 			notify("Hotspot created: " + ssid)
 		else:
-			notify("Failed to create hotspot. Is WiFi available?")
+			notify("Failed to create hotspot. Is WiFi available?"))
+	get_tree().root.add_child(dialog)
+	dialog.popup_centered()
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.canceled.connect(dialog.queue_free)
 
 
 func _stop_hotspot() -> void:

@@ -124,7 +124,7 @@ func build() -> void:
 	
 	var hc_enabled := Sh.get_high_contrast()
 	var hc_toggle := CheckBox.new()
-	hc_toggle.pressed = hc_enabled
+	hc_toggle.button_pressed = hc_enabled
 	hc_toggle.text = "High Contrast Mode"
 	hc_toggle.tooltip_text = "Enable high contrast theme for better visibility"
 	hc_toggle.toggled.connect(_on_high_contrast_toggled)
@@ -173,8 +173,8 @@ func _on_high_contrast_toggled(enabled: bool) -> void:
 
 
 func _on_scale_changed(idx: int) -> void:
-	var scales := ["1.0", "1.25", "1.5", "1.75", "2.0"]
-	var scale := scales[idx]
+	var scales: Array[String] = ["1.0", "1.25", "1.5", "1.75", "2.0"]
+	var scale: String = scales[idx]
 	Sh.kde_write("kdeglobals", "KScreen", "ScaleFactor", scale)
 	Sh.kde_write("kdeglobals", "KDE", "ForceFontDPI", str(int(float(scale) * 96)))
 	Sh.run("systemctl --user restart plasma-kaccess.service >/dev/null 2>&1 &")

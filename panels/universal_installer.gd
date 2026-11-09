@@ -16,7 +16,7 @@ func build() -> void:
 	
 	var drop_zone := VBoxContainer.new()
 	drop_zone.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	drop_zone.custom_minimum_height = 120
+	drop_zone.custom_minimum_size = Vector2(0, 120)
 	c.add_child(drop_zone)
 	
 	var drop_icon := Label.new()
@@ -33,14 +33,14 @@ func build() -> void:
 	
 	var browse_btn := Button.new()
 	browse_btn.text = "Browse Files"
-	browse_btn.icon = theme.get_icon("Load", "EditorIcons") if theme.has_icon("Load", "EditorIcons") else null
 	browse_btn.pressed.connect(_on_browse)
 	drop_zone.add_child(browse_btn)
 	
 	# Make it a drop target
 	drop_zone.mouse_entered.connect(_on_drag_enter.bind(drop_zone))
 	drop_zone.mouse_exited.connect(_on_drag_exit.bind(drop_zone))
-	drop_zone.gui_input.connect(_on_gui_input.bind(drop_zone))
+	if is_inside_tree():
+		get_window().files_dropped.connect(_on_files_dropped)
 	
 	# Info section
 	var info_section := VBoxContainer.new()
@@ -50,7 +50,7 @@ func build() -> void:
 	_install_btn.text = "Install / Run"
 	_install_btn.disabled = true
 	_install_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_install_btn.custom_minimum_height = 40
+	_install_btn.custom_minimum_size = Vector2(0, 40)
 	_install_btn.pressed.connect(_on_install)
 	info_section.add_child(_install_btn)
 	
@@ -88,7 +88,7 @@ func build() -> void:
 		
 		var ext_label := Label.new()
 		ext_label.text = fmt["ext"]
-		ext_label.custom_minimum_width = 100
+		ext_label.custom_minimum_size = Vector2(100, 0)
 		ext_label.add_theme_font_size_override("font_size", 13)
 		ext_label.add_theme_color_override("font_color", Color(0.4, 0.7, 1.0))
 		row.add_child(ext_label)
@@ -112,7 +112,10 @@ func _on_browse() -> void:
 	dialog.filters = ["*.deb", "*.rpm", "*.AppImage", "*.exe", "*.flatpakref", "*.snap", "*"]
 	dialog.current_dir = Sh.home() + "/Downloads"
 	dialog.file_selected.connect(_on_file_selected)
+	get_tree().root.add_child(dialog)
 	dialog.popup_centered()
+	dialog.file_selected.connect(dialog.queue_free)
+	dialog.canceled.connect(dialog.queue_free)
 
 
 func _on_file_selected(path: String) -> void:
@@ -129,17 +132,8 @@ func _on_drag_exit(zone: VBoxContainer) -> void:
 	zone.add_theme_stylebox_override("panel", _make_drop_stylebox(Color(0.1, 0.1, 0.1, 0.1)))
 
 
-func _on_gui_input(zone: VBoxContainer, event: InputEvent) -> void:
-	if event is InputEventScreenDrag or event is InputEventMouseMotion:
-		# Handle drag over
-		pass
-	elif event is InputEventScreenDrop or event is InputEventMouseButton:
-		# Godot 4 handles file drops via _drop_files_requested
-		pass
-
-
-func _drop_files_requested(files: PackedStringArray, screen_pos: Vector2) -> void:
-	# This is called by Godot when files are dropped
+func _on_files_dropped(files: PackedStringArray) -> void:
+	# Window.files_dropped: OS file drag-and-drop onto the app window.
 	for file in files:
 		if file.ends_with(".deb") or file.ends_with(".rpm") or file.ends_with(".AppImage") or \
 		   file.ends_with(".exe") or file.ends_with(".flatpakref") or file.ends_with(".snap"):
@@ -174,10 +168,10 @@ func _update_ui() -> void:
 		return
 	
 	var filename := _file_path.get_file()
-	var icons := {"deb": "📦", "rpm": "📦", "appimage": "🚀", "exe": "🪟", "flatpakref": "📱", "snap": "📦"}
-	var icon := icons.get(_file_type, "📄")
+	var icons: Dictionary = {"deb": "📦", "rpm": "📦", "appimage": "🚀", "exe": "🪟", "flatpakref": "📱", "snap": "📦"}
+	var icon: String = str(icons.get(_file_type, "📄"))
 	
-	_file_label.text = icon + " " + filename + "\nType: " + _file_type.upper()
+	_file_label.text = icon + " " + filename + "\nType: " + _file_type.to_upper()
 	
 	var btn_texts := {
 		"deb": "Install Package",
