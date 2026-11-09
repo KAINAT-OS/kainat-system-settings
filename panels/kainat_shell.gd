@@ -378,3 +378,280 @@ static func os_release() -> Dictionary:
 			var v: String = stripped.substr(idx + 1).strip_edges().trim_prefix("\"").trim_suffix("\"")
 			info[k] = v
 	return info
+
+
+# --- disk helpers -----------------------------------------------------------
+
+static func file_exists(path: String) -> bool:
+	return FileAccess.file_exists(path)
+
+
+static func dir_exists(path: String) -> bool:
+	return DirAccess.dir_exists_absolute(path)
+
+
+# --- driver helpers ---------------------------------------------------------
+
+static func get_pci_devices() -> PackedStringArray:
+	var output: String = run_capture("lspci -nn")
+	var lines := output.split("\n")
+	var devices := PackedStringArray()
+	for line in lines:
+		var stripped: String = line.strip_edges()
+		if not stripped.is_empty():
+			devices.append(stripped)
+	return devices
+
+
+static func has_nvidia_gpu() -> bool:
+	var output: String = run_capture("lspci | grep -i nvidia")
+	return not output.strip_edges().is_empty()
+
+
+static func is_package_installed(package: String) -> bool:
+	var output: String = run_capture("dpkg -l " + quote(package) + " 2>/dev/null | grep ^ii")
+	return not output.strip_edges().is_empty()
+
+
+static func install_package(package: String) -> int:
+	return run_wait("pkexec apt update && pkexec apt install -y " + quote(package))
+
+
+# --- disk manager helpers ---------------------------------------------------
+
+static func list_block_devices() -> Array:
+	# Returns array of dicts with: name, mountpoint, size, type, children
+	var output: String = run_capture("lsblk -o NAME,MOUNTPOINT,SIZE,TYPE -n -J")
+	var json: JSON = JSON.new()
+	var result := json.parse_string(output)
+	if json.has_error():
+		return []
+	return result.get("blockdevices", [])
+
+
+static func get_disk_usage(mountpoint: String) -> Dictionary:
+	var result: Dictionary = {"total": 0, "used": 0, "available": 0, "percent": 0}
+	if mountpoint.is_empty():
+		return result
+	var output: String = run_capture("df -h " + quote(mountpoint) + " | tail -1")
+	var parts := output.strip_edges().split(" ", true)
+	if parts.size() >= 5:
+		result["total"] = parts[1]
+		result["used"] = parts[2]
+		result["available"] = parts[3]
+		result["percent"] = parts[4].trim_suffix("%")
+	return result
+
+
+static func eject_drive(device: String) -> int:
+	# device is like /dev/sdb
+	return run_wait("udisksctl unmount -b " + quote(device) + " && udisksctl power-off -b " + quote(device))
+
+
+static func format_drive(device: String, fs: String) -> int:
+	# fs: vfat (FAT32), ntfs, ext4
+	var cmd: String = ""
+	match fs:
+		"vfat":
+			cmd = "mkfs.vfat -F 32 " + quote(device)
+		"ntfs":
+			cmd = "mkfs.ntfs -f " + quote(device)
+		"ext4":
+			cmd = "mkfs.ext4 -F " + quote(device)
+		_:
+			return -1
+	return run_wait("pkexec " + cmd)
+
+
+# --- VPN helpers ------------------------------------------------------------
+
+static func start_openvpn(config_path: String) -> int:
+	return run_wait("pkexec openvpn --config " + quote(config_path) + " --daemon")
+
+
+static func stop_openvpn() -> void:
+	run("pkexec pkill -f 'openvpn --config'")
+
+
+static func list_vpn_configs(dir: String) -> PackedStringArray:
+	var output: String = run_capture("ls " + quote(dir) + "*.ovpn 2>/dev/null")
+	var lines := PackedStringArray()
+	for line in output.split("\n"):
+		var stripped: String = line.strip_edges()
+		if not stripped.is_empty():
+			lines.append(stripped.get_file())
+	return lines
+
+
+# --- SSH helpers ------------------------------------------------------------
+
+static func generate_ssh_key(key_path: String, key_type: String = "ed25519") -> int:
+	# -N '' = no passphrase
+	return run_wait("ssh-keygen -t " + quote(key_type) + " -f " + quote(key_path) + " -N ''")
+
+
+static func get_ssh_public_key(key_path: String) -> String:
+	var pub_path := key_path + ".pub"
+	if not file_exists(pub_path):
+		return ""
+	return read_text(pub_path).strip_edges()
+
+
+# --- input method helpers ---------------------------------------------------
+
+static func install_cjk_support() -> int:
+	return run_wait("pkexec apt install -y fcitx5 fcitx5-googlepinyin fcitx5-mozc fcitx5-table-extra")
+
+
+static func install_arabic_support() -> int:
+	return run_wait("pkexec apt install -y fcitx5 fcitx5-table-extra")
+
+
+# --- hotspot helpers --------------------------------------------------------
+
+static func create_wifi_hotspot(ssid: String, password: String) -> int:
+	return run_wait("nmcli dev wifi hotspot con-name 'Kainat-Hotspot' ssid " + quote(ssid) + " password " + quote(password))
+
+
+static func stop_wifi_hotspot() -> int:
+	return run_wait("nmcli con down 'Kainat-Hotspot' && nmcli con delete 'Kainat-Hotspot'")
+
+
+# --- proxy helpers ----------------------------------------------------------
+
+static func set_system_proxy(mode: String, host: String = "", port: String = "") -> void:
+	# mode: "manual", "auto", "none"
+	run("gsettings set org.gnome.system.proxy mode " + quote(mode))
+	if mode == "manual" and not host.is_empty():
+		run("gsettings set org.gnome.system.proxy.http host " + quote(host))
+		run("gsettings set org.gnome.system.proxy.http port " + quote(port))
+		run("gsettings set org.gnome.system.proxy.https host " + quote(host))
+		run("gsettings set org.gnome.system.proxy.https port " + quote(port))
+
+
+static func get_system_proxy() -> Dictionary:
+	var mode := run_capture("gsettings get org.gnome.system.proxy mode").strip_edges().trim_prefix("'").trim_suffix("'")
+	var host := run_capture("gsettings get org.gnome.system.proxy.http host").strip_edges().trim_prefix("'").trim_suffix("'")
+	var port := run_capture("gsettings get org.gnome.system.proxy.http port").strip_edges()
+	return {"mode": mode, "host": host, "port": port}
+
+
+# --- repo helpers -----------------------------------------------------------
+
+static func list_apt_sources() -> Array:
+	var sources_dir := "/etc/apt/sources.list.d/"
+	var output: String = run_capture("ls " + quote(sources_dir) + "*.list 2>/dev/null")
+	var result := Array()
+	for line in output.split("\n"):
+		var stripped: String = line.strip_edges()
+		if not stripped.is_empty():
+			var content: String = read_text(stripped)
+			var enabled := not content.begins_with("#")
+			result.append({"file": stripped, "name": stripped.get_file(), "content": content, "enabled": enabled})
+	return result
+
+
+static func toggle_apt_source(file_path: String, enabled: bool) -> int:
+	var content: String = read_text(file_path)
+	if enabled:
+		# Enable: uncomment lines starting with # deb
+		content = content.replace("# deb", "deb")
+		content = content.replace("# deb-src", "deb-src")
+	else:
+		# Disable: comment out deb lines
+		var lines := content.split("\n")
+		var new_lines := PackedStringArray()
+		for l in lines:
+			var stripped := l.strip_edges()
+			if stripped.begins_with("deb ") or stripped.begins_with("deb-src "):
+				new_lines.append("# " + l)
+			else:
+				new_lines.append(l)
+		content = "\n".join(new_lines)
+	return run_wait("pkexec sh -c 'printf %s " + quote(content) + " > " + quote(file_path) + "'")
+
+
+# --- universal installer helpers --------------------------------------------
+
+static func install_deb_file(path: String) -> int:
+	return run_wait("pkexec dpkg -i " + quote(path) + " && pkexec apt-get install -f -y")
+
+
+static func install_rpm_file(path: String) -> int:
+	return run_wait("pkexec apt install -y alien && pkexec alien -i " + quote(path))
+
+
+static func run_appimage(path: String) -> int:
+	return run_wait("chmod +x " + quote(path) + " && " + quote(path))
+
+
+static func run_wine_exe(path: String) -> int:
+	return run_wait("pkexec wine " + quote(path))
+
+
+# --- system reset helpers ---------------------------------------------------
+
+static func reset_user_settings() -> int:
+	# Reset config but preserve data
+	var dirs := [
+		home() + "/.config",
+		home() + "/.local/share/config"
+	]
+	var exit_code := 0
+	for dir in dirs:
+		if dir_exists(dir):
+			exit_code = run_wait("rm -rf " + quote(dir) + "/*")
+			if exit_code != 0:
+				break
+	return exit_code
+
+
+# --- accessibility helpers --------------------------------------------------
+
+static func set_high_contrast(enabled: bool) -> void:
+	var val := "true" if enabled else "false"
+	run("gsettings set org.gnome.desktop.interface high-contrast-enabled " + val)
+	# Also trigger Plasma reload
+	run("systemctl --user restart plasma-kaccess.service >/dev/null 2>&1 &")
+	run("plasmashell --replace >/dev/null 2>&1 &")
+
+
+static func get_high_contrast() -> bool:
+	var val := run_capture("gsettings get org.gnome.desktop.interface high-contrast-enabled").strip_edges().trim_prefix("'").trim_suffix("'")
+	return val == "true"
+
+
+# --- diagnostics helpers ----------------------------------------------------
+
+static func get_cpu_temp() -> int:
+	var output: String = run_capture("sensors 2>/dev/null | grep -i 'package id 0:' | head -1 | awk '{print \$4}' | cut -d'+' -f2 | cut -d'.' -f1")
+	if output.is_empty():
+		# Fallback to /sys
+		var paths := DirAccess.get_directories("/sys/class/hwmon")
+		for p in paths:
+			var label := read_text("/sys/class/hwmon/" + p + "/name").strip_edges()
+			if "coretemp" in label or "k10temp" in label:
+				var temp_str := read_text("/sys/class/hwmon/" + p + "/temp1_input").strip_edges()
+				if temp_str.is_valid_number():
+					return int(temp_str) / 1000
+		return -1
+	return int(output.strip_edges())
+
+
+static func get_ram_usage() -> Dictionary:
+	var output: String = run_capture("free -m | grep Mem")
+	var parts := output.strip_edges().split(" ", true)
+	var result: Dictionary = {"total": 0, "used": 0, "free": 0, "percent": 0.0}
+	if parts.size() >= 3:
+		result["total"] = int(parts[1])
+		result["used"] = int(parts[2])
+		result["free"] = int(parts[3]) if parts.size() > 3 else 0
+		if result["total"] > 0:
+			result["percent"] = float(result["used"]) / float(result["total"]) * 100.0
+	return result
+
+
+static func get_disk_health() -> String:
+	# Check root partition
+	var output: String = run_capture("df -h / | tail -1 | awk '{print \$5}'").strip_edges()
+	return output

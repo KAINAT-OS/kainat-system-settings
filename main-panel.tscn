@@ -1451,6 +1451,41 @@ toggle_mode = true
 button_group = ExtResource("2_8an0a")
 text = "Drivers"
 
+[node name="disk_manager" type="Button" parent="MarginContainer/VBoxContainer/HBoxContainer/ScrollContainer/menu-buttons"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+toggle_mode = true
+button_group = ExtResource("2_8an0a")
+text = "Disk Manager"
+
+[node name="vpn_manager" type="Button" parent="MarginContainer/VBoxContainer/HBoxContainer/ScrollContainer/menu-buttons"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+toggle_mode = true
+button_group = ExtResource("2_8an0a")
+text = "VPN"
+
+[node name="ssh_manager" type="Button" parent="MarginContainer/VBoxContainer/HBoxContainer/ScrollContainer/menu-buttons"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+toggle_mode = true
+button_group = ExtResource("2_8an0a")
+text = "SSH Keys"
+
+[node name="input_methods" type="Button" parent="MarginContainer/VBoxContainer/HBoxContainer/ScrollContainer/menu-buttons"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+toggle_mode = true
+button_group = ExtResource("2_8an0a")
+text = "Input Methods"
+
+[node name="universal_installer" type="Button" parent="MarginContainer/VBoxContainer/HBoxContainer/ScrollContainer/menu-buttons"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+toggle_mode = true
+button_group = ExtResource("2_8an0a")
+text = "Install Package"
+
 [node name="router" type="PanelContainer" parent="MarginContainer/VBoxContainer/HBoxContainer"]
 layout_mode = 2
 size_flags_horizontal = 3

@@ -42,6 +42,9 @@ func build() -> void:
 	kcm_row(c3, "Wayland / Session", "Display server information.", "W", "kcm_wayland")
 	kcm_row(c3, "OpenGL Information", "Graphics stack details.", "G", "kcm_glx")
 
+	# System maintenance section
+	_add_reset_section()
+
 	defer(_populate)
 
 
@@ -167,3 +170,109 @@ func _gpu() -> String:
 			if idx != -1:
 				return line.substr(idx + 1).strip_edges()
 	return UNAVAILABLE
+
+
+# --- System Reset & Diagnostics ---
+
+func _add_reset_section() -> void:
+	section("System Maintenance")
+	var c := card()
+	
+	action_row(c, "Run System Diagnostics", "Check disk, RAM, CPU temperature, and services.", "D", "Run Diagnostics", func() -> void:
+		_run_diagnostics()
+	)
+	
+	action_row(c, "Reset System Settings", "Restore themes, panel layout, and configs to defaults.\nPreserves user files (Documents, Downloads, etc.).", "R", "Reset Settings", func() -> void:
+		_reset_settings()
+	)
+	
+	action_row(c, "Collect System Logs", "Gather journalctl, dmesg, and system info for bug reports.", "L", "Collect Logs", func() -> void:
+		_collect_logs()
+	)
+
+
+func _run_diagnostics() -> void:
+	notify("Running system diagnostics...")
+	
+	var output := ""
+	
+	# CPU Temperature
+	var temp := Sh.get_cpu_temp()
+	if temp > 0:
+		output += "CPU Temperature: " + str(temp) + "°C\n"
+		if temp > 80:
+			output += "  ⚠️ HIGH - Consider cleaning dust or checking cooling\n"
+	elif temp == -1:
+		output += "CPU Temperature: Could not read (no sensors)\n"
+	
+	# RAM Usage
+	var ram := Sh.get_ram_usage()
+	if ram["total"] > 0:
+		output += "RAM: " + str(ram["used"]) + " MB / " + str(ram["total"]) + " MB (" + str(int(ram["percent"])) + "%)\n"
+		if ram["percent"] > 85:
+			output += "  ⚠️ HIGH - Consider closing unused apps\n"
+	
+	# Disk Usage
+	var disk := Sh.get_disk_health()
+	if not disk.is_empty():
+		output += "Disk (root): " + disk + " used\n"
+		var pct := int(disk.trim_suffix("%"))
+		if pct > 90:
+			output += "  ⚠️ CRITICAL - Free up space immediately\n"
+		elif pct > 80:
+			output += "  ⚠️ HIGH - Consider cleaning up\n"
+	
+	# Services
+	var failed := Sh.run_capture("systemctl --failed --no-legend 2>/dev/null | wc -l").strip_edges().to_int()
+	if failed > 0:
+		output += "\nFailed systemd services: " + str(failed) + "\n"
+	
+	# Show results
+	var dialog := AcceptDialog.new()
+	dialog.title = "System Diagnostics"
+	dialog.text = output.strip_edges()
+	dialog.ok_text = "OK"
+	dialog.min_size = Vector2(500, 400)
+	dialog.popup_centered()
+
+
+func _reset_settings() -> void:
+	var dialog := AcceptDialog.new()
+	dialog.title = "Reset System Settings?"
+	dialog.text = "This will delete your user configuration files:\n• ~/.config/*\n• ~/.local/share/config/*\n\nYour personal files (Documents, Downloads, Pictures, etc.) will NOT be touched.\n\nYou will need to log out and back in for changes to take full effect."
+	dialog.ok_text = "Reset Settings"
+	dialog.add_cancel_button("Cancel")
+	
+	if dialog.popup() == OK:
+		notify("Resetting settings... Please wait.")
+		var code := Sh.reset_user_settings()
+		if code == 0:
+			notify("Settings reset complete. Please log out and back in.")
+		else:
+			notify("Reset completed with some errors. Check terminal.")
+
+
+func _collect_logs() -> void:
+	notify("Collecting system logs...")
+	
+	var log_dir := Sh.home() + "/kainat-logs-" + str(OS.get_unix_time())
+	Sh.run("mkdir -p " + Sh.quote(log_dir))
+	
+	Sh.run("journalctl --no-pager > " + Sh.quote(log_dir + "/journalctl.log") + " 2>&1")
+	Sh.run("dmesg > " + Sh.quote(log_dir + "/dmesg.log") + " 2>&1")
+	Sh.run("lspci -nn > " + Sh.quote(log_dir + "/lspci.log") + " 2>&1")
+	Sh.run("lsusb > " + Sh.quote(log_dir + "/lsusb.log") + " 2>&1")
+	Sh.run("df -h > " + Sh.quote(log_dir + "/disk.log") + " 2>&1")
+	Sh.run("free -h > " + Sh.quote(log_dir + "/memory.log") + " 2>&1")
+	Sh.run("cat /etc/os-release > " + Sh.quote(log_dir + "/os-release.log") + " 2>&1")
+	Sh.run("uname -a > " + Sh.quote(log_dir + "/kernel.log") + " 2>&1")
+	
+	notify("Logs saved to: " + log_dir)
+	
+	var dialog := AcceptDialog.new()
+	dialog.title = "Logs Collected"
+	dialog.text = "System logs saved to:\n" + log_dir + "\n\nYou can attach these when reporting issues."
+	dialog.ok_text = "Open Folder"
+	dialog.add_cancel_button("Close")
+	if dialog.popup() == OK:
+		Sh.run("xdg-open " + Sh.quote(log_dir))

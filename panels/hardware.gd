@@ -23,6 +23,9 @@ func _populate() -> void:
 	var hot_c: float = _hottest_celsius(temps)
 	var shown_c: float = cpu_c if cpu_c > UNKNOWN_TEMP else hot_c
 
+	# Live monitoring labels
+	var live_labels: Dictionary = {}
+	
 	info_tiles([
 		{"value": os_name, "label": "Operating system"},
 		{"value": kernel, "label": "Kernel"},
@@ -53,19 +56,86 @@ func _populate() -> void:
 		var sensors: String = Sh.run_capture("sensors 2>/dev/null")
 		_show_list("Sensors", sensors if not sensors.is_empty() else "No sensors detected."))
 
-	section("System Monitor")
+	# Live Monitoring Section
+	section("Live Monitoring")
 	var c3 := card()
-	kcm_row(c3, "Resource Monitor", "Open the live process and resource monitor.", "R", "kcm_memory")
+	
+	# CPU Temp
+	var temp_label := Label.new()
+	temp_label.name = "live_temp"
+	temp_label.text = "CPU Temp: " + _temp_text(shown_c)
+	c3.add_child(temp_label)
+	live_labels["temp"] = temp_label
+	
+	# RAM Usage
+	var ram := Sh.get_ram_usage()
+	var ram_label := Label.new()
+	ram_label.name = "live_ram"
+	ram_label.text = "RAM: " + str(ram["used"]) + " / " + str(ram["total"]) + " MB (" + str(int(ram["percent"])) + "%)"
+	c3.add_child(ram_label)
+	live_labels["ram"] = ram_label
+	
+	# Disk Usage
+	var disk := Sh.get_disk_health()
+	var disk_label := Label.new()
+	disk_label.name = "live_disk"
+	disk_label.text = "Disk (root): " + disk + " used"
+	c3.add_child(disk_label)
+	live_labels["disk"] = disk_label
+	
+	# CPU Freq (if available)
+	var freq_label := Label.new()
+	freq_label.name = "live_freq"
+	var freq_output := Sh.run_capture("cat /proc/cpuinfo | grep 'cpu MHz' | head -1 | awk '{print $4}'").strip_edges()
+	if not freq_output.is_empty():
+		freq_label.text = "CPU Freq: " + freq_output + " MHz"
+	else:
+		freq_label.text = "CPU Freq: N/A"
+	c3.add_child(freq_label)
+	live_labels["freq"] = freq_label
+	
+	# Start live update timer
+	var timer := Timer.new()
+	timer.wait_time = 3.0
+	timer.autostart = true
+	timer.timeout.connect(_update_live_stats.bind(live_labels))
+	add_child(timer)
+
+	section("System Monitor")
+	var c4 := card()
+	kcm_row(c4, "Resource Monitor", "Open the live process and resource monitor.", "R", "kcm_memory")
 	nav_row(c3, "System Monitor", "Processes, CPU, memory and disk usage.", "S", func() -> void:
 		if Sh.has_tool("plasma-systemmonitor"):
 			Sh.launch("plasma-systemmonitor")
 		else:
 			notify("No system monitor installed."))
-	kcm_row(c3, "Energy Statistics", "Power consumption per component.", "E", "kcm_energyinfo")
+	kcm_row(c4, "Energy Statistics", "Power consumption per component.", "E", "kcm_energyinfo")
 
 	section("Firmware")
-	var c4 := card()
-	kcm_row(c4, "Firmware Security", "Secure Boot and firmware status.", "F", "kcm_firmware_security")
+	var c5 := card()
+	kcm_row(c5, "Firmware Security", "Secure Boot and firmware status.", "F", "kcm_firmware_security")
+
+
+func _update_live_stats(labels: Dictionary) -> void:
+	var temps: Array = _temperature_readings()
+	var cpu_c: float = _cpu_celsius(temps)
+	var hot_c: float = _hottest_celsius(temps)
+	var shown_c: float = cpu_c if cpu_c > UNKNOWN_TEMP else hot_c
+	
+	if labels.has("temp") and is_instance_valid(labels["temp"]):
+		labels["temp"].text = "CPU Temp: " + _temp_text(shown_c) + " (Hottest: " + _temp_text(hot_c) + ")"
+	
+	var ram := Sh.get_ram_usage()
+	if ram["total"] > 0 and labels.has("ram") and is_instance_valid(labels["ram"]):
+		labels["ram"].text = "RAM: " + str(ram["used"]) + " / " + str(ram["total"]) + " MB (" + str(int(ram["percent"])) + "%)"
+	
+	var disk := Sh.get_disk_health()
+	if not disk.is_empty() and labels.has("disk") and is_instance_valid(labels["disk"]):
+		labels["disk"].text = "Disk (root): " + disk + " used"
+	
+	var freq_output := Sh.run_capture("cat /proc/cpuinfo | grep 'cpu MHz' | head -1 | awk '{print $4}'").strip_edges()
+	if not freq_output.is_empty() and labels.has("freq") and is_instance_valid(labels["freq"]):
+		labels["freq"].text = "CPU Freq: " + freq_output + " MHz"
 
 
 func _show_list(title: String, text: String) -> void:

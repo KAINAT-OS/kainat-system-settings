@@ -1,15 +1,16 @@
 extends SettingsPanel
-# Networks & Connections: native device status via nmcli, complex config via KCMs.
+# Networks & Connections: native device status via nmcli, VPN, Proxy, Hotspot.
+# Complex config delegated to KCMs.
 
 var _status_card: VBoxContainer
-# Read live by the toggle's callback (GDScript lambdas capture locals by
-# value, but member variables are looked up when the lambda runs) so a failed
-# radio change can snap the switch back to reality.
 var _bt_check: CheckButton = null
+var _proxy_host: LineEdit
+var _proxy_port: LineEdit
+var _proxy_mode: OptionButton
 
 
 func build() -> void:
-	page_header("Networks & Connections", "Wi-Fi, Ethernet, Bluetooth and connectivity.")
+	page_header("Networks & Connections", "Wi-Fi, Ethernet, Bluetooth, VPN, Proxy, and Hotspot.")
 	_build_static()
 	defer(_populate_status)
 
@@ -18,24 +19,148 @@ func _build_static() -> void:
 	section("Status")
 	var c := card()
 	_status_card = c
-
-	section("Wi-Fi")
-	var c2 := card()
-	action_row(c2, "Wi-Fi", "Connect to or disconnect from wireless networks.", "W", "Manage", func() -> void:
+	
+	section("Wi-Fi & Ethernet")
+	c = card()
+	action_row(c, "Network Connections", "Connect to or edit Wi-Fi/Ethernet profiles.", "N", "Manage", func() -> void:
 		_open_network())
-	kcm_row(c2, "Network Connections", "Edit saved connection profiles.", "N", "kcm_networkmanagement")
-	kcm_row(c2, "Network Preferences", "Generic network preferences.", "P", "kcm_netpref")
-	kcm_row(c2, "Proxy", "HTTP and SOCKS proxy configuration.", "X", "kcm_proxy")
-
-	section("Sharing & Devices")
-	var c3 := card()
-	_bt_check = toggle_row(c3, "Bluetooth", "Enable or disable Bluetooth radio.", "B", _is_bluetooth_on(),
+	kcm_row(c, "Network Connections (Advanced)", "Full NetworkManager editor.", "N", "kcm_networkmanagement")
+	kcm_row(c, "Network Preferences", "Generic network preferences.", "P", "kcm_netpref")
+	
+	# VPN Section
+	section("VPN")
+	c = card()
+	action_row(c, "VPN Manager", "Manage OpenVPN and WireGuard connections.", "V", "Open VPN Manager", func() -> void:
+		Sh._virtual_press_button("vpn_manager")
+	)
+	kcm_row(c, "VPN Settings (KDE)", "Configure VPN via KDE.", "V", "kcm_vpn")
+	
+	# Proxy Section
+	section("Proxy")
+	c = card()
+	
+	# Load current proxy settings
+	var proxy := Sh.get_system_proxy()
+	
+	_proxy_mode = OptionButton.new()
+	_proxy_mode.add_item("None")
+	_proxy_mode.add_item("Manual")
+	_proxy_mode.add_item("Auto (PAC)")
+	_proxy_mode.selected = 0 if proxy["mode"] == "none" else (1 if proxy["mode"] == "manual" else 2)
+	
+	_proxy_host = LineEdit.new()
+	_proxy_host.placeholder_text = "proxy.example.com"
+	_proxy_host.text = proxy["host"]
+	_proxy_host.visible = _proxy_mode.selected == 1
+	
+	_proxy_port = LineEdit.new()
+	_proxy_port.placeholder_text = "8080"
+	_proxy_port.text = proxy["port"]
+	_proxy_port.visible = _proxy_mode.selected == 1
+	
+	_proxy_mode.item_selected.connect(_on_proxy_mode_changed)
+	
+	var proxy_row := HBoxContainer.new()
+	proxy_row.add_child(Label.new().set_text("Mode:"))
+	proxy_row.add_child(_proxy_mode)
+	proxy_row.add_child(Label.new().set_text("Host:"))
+	proxy_row.add_child(_proxy_host)
+	proxy_row.add_child(Label.new().set_text("Port:"))
+	proxy_row.add_child(_proxy_port)
+	c.add_child(proxy_row)
+	
+	action_row(c, "Apply Proxy", "Save proxy settings system-wide.", "A", "Apply", func() -> void:
+		_apply_proxy()
+	)
+	
+	# Hotspot Section
+	section("WiFi Hotspot")
+	c = card()
+	action_row(c, "Create Hotspot", "Turn this device into a WiFi access point.", "H", "Create", func() -> void:
+		_create_hotspot()
+	)
+	action_row(c, "Stop Hotspot", "Disable the WiFi hotspot.", "H", "Stop", func() -> void:
+		_stop_hotspot()
+	)
+	
+	# Bluetooth
+	section("Bluetooth")
+	c = card()
+	_bt_check = toggle_row(c, "Bluetooth", "Enable or disable Bluetooth radio.", "B", _is_bluetooth_on(),
 		func(on: bool) -> void:
 			_set_bluetooth(on))
-	kcm_row(c3, "Bluetooth Devices", "Pair and manage Bluetooth devices.", "D", "kcm_bluetooth")
-	kcm_row(c3, "KDE Connect", "Link your phone and other devices.", "K", "kcm_kdeconnect")
-	kcm_row(c3, "Samba", "Windows file sharing status.", "S", "kcm_samba")
-	kcm_row(c3, "Web Shortcuts", "Search keywords for web services.", "U", "kcm_webshortcuts")
+	kcm_row(c, "Bluetooth Devices", "Pair and manage Bluetooth devices.", "D", "kcm_bluetooth")
+	kcm_row(c, "KDE Connect", "Link your phone and other devices.", "K", "kcm_kdeconnect")
+	
+	# Sharing
+	section("Sharing")
+	c = card()
+	kcm_row(c, "Samba", "Windows file sharing status.", "S", "kcm_samba")
+	kcm_row(c, "Web Shortcuts", "Search keywords for web services.", "U", "kcm_webshortcuts")
+
+
+func _on_proxy_mode_changed(idx: int) -> void:
+	var visible := idx == 1
+	_proxy_host.visible = visible
+	_proxy_port.visible = visible
+
+
+func _apply_proxy() -> void:
+	var mode_map := ["none", "manual", "auto"]
+	var mode := mode_map[_proxy_mode.selected]
+	var host := _proxy_host.text.strip_edges()
+	var port := _proxy_port.text.strip_edges()
+	
+	Sh.set_system_proxy(mode, host, port)
+	notify("Proxy settings applied.")
+
+
+func _create_hotspot() -> void:
+	var dialog := ConfirmationDialog.new()
+	dialog.title = "Create WiFi Hotspot"
+	dialog.text = "This will create a hotspot using your WiFi adapter.\n\nEnter SSID and Password:"
+	dialog.ok_text = "Create"
+	dialog.add_cancel_button("Cancel")
+	
+	var ssid_edit := LineEdit.new()
+	ssid_edit.placeholder_text = "Kainat-Hotspot"
+	ssid_edit.text = "Kainat-" + str(OS.get_unix_time() % 10000)
+	
+	var pass_edit := LineEdit.new()
+	pass_edit.placeholder_text = "Minimum 8 characters"
+	pass_edit.text = "kainat123"
+	pass_edit.secret = true
+	
+	var vbox := VBoxContainer.new()
+	vbox.add_child(Label.new().set_text("SSID:"))
+	vbox.add_child(ssid_edit)
+	vbox.add_child(Label.new().set_text("Password:"))
+	vbox.add_child(pass_edit)
+	dialog.add_child(vbox)
+	
+	if dialog.popup() == OK:
+		var ssid := ssid_edit.text.strip_edges()
+		var pass := pass_edit.text.strip_edges()
+		
+		if ssid.is_empty() or pass.length() < 8:
+			notify("SSID required, password must be 8+ chars")
+			return
+		
+		notify("Creating hotspot...")
+		var code := Sh.create_wifi_hotspot(ssid, pass)
+		if code == 0:
+			notify("Hotspot created: " + ssid)
+		else:
+			notify("Failed to create hotspot. Is WiFi available?")
+
+
+func _stop_hotspot() -> void:
+	notify("Stopping hotspot...")
+	var code := Sh.stop_wifi_hotspot()
+	if code == 0:
+		notify("Hotspot stopped.")
+	else:
+		notify("Failed to stop hotspot.")
 
 
 func _nmcli_available() -> bool:
@@ -72,10 +197,6 @@ func _open_network() -> void:
 		Sh._notify_missing("nmcli", "Network configuration", notify)
 
 
-# bluetoothctl is quick, so run it to completion and look at the exit code.
-# A fire-and-forget call would announce "enabled" even when the radio is
-# rfkill-blocked or bluetoothd is down — and the switch would keep claiming
-# it. On failure, re-read what the adapter actually reports and undo.
 func _set_bluetooth(on: bool) -> void:
 	if not Sh.has_tool("bluetoothctl"):
 		notify("Bluetooth tools are not installed.")
@@ -94,4 +215,3 @@ func _set_bluetooth(on: bool) -> void:
 func _is_bluetooth_on() -> bool:
 	var out := Sh.run_capture("bluetoothctl show 2>/dev/null")
 	return out.contains("Powered: yes")
-

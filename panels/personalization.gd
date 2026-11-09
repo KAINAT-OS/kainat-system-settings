@@ -118,6 +118,69 @@ func build() -> void:
 	kcm_row(c3, "Window Switching", "Task switcher (Alt+Tab) layout.", "T", "kcm_kwintabbox")
 	kcm_row(c3, "KWin Scripts", "Extend the window manager.", "K", "kcm_kwin_scripts")
 
+	# Accessibility / Visual
+	section("Accessibility & Visual")
+	var c4 := card()
+	
+	var hc_enabled := Sh.get_high_contrast()
+	var hc_toggle := CheckBox.new()
+	hc_toggle.pressed = hc_enabled
+	hc_toggle.text = "High Contrast Mode"
+	hc_toggle.tooltip_text = "Enable high contrast theme for better visibility"
+	hc_toggle.toggled.connect(_on_high_contrast_toggled)
+	c4.add_child(hc_toggle)
+	
+	# Font scaling
+	var scale_label := Label.new()
+	scale_label.text = "UI Scale Factor:"
+	c4.add_child(scale_label)
+	
+	var scale_box := OptionButton.new()
+	scale_box.add_item("100% (Default)")
+	scale_box.add_item("125%")
+	scale_box.add_item("150%")
+	scale_box.add_item("175%")
+	scale_box.add_item("200%")
+	
+	# Try to read current scale
+	var current_scale := Sh.kde_read("kdeglobals", "KScreen", "ScaleFactor", "1.0").strip_edges()
+	match current_scale:
+		"1.0": scale_box.selected = 0
+		"1.25": scale_box.selected = 1
+		"1.5": scale_box.selected = 2
+		"1.75": scale_box.selected = 3
+		"2.0": scale_box.selected = 4
+		_: scale_box.selected = 0
+	
+	scale_box.item_selected.connect(_on_scale_changed)
+	c4.add_child(scale_box)
+	
+	action_row(c4, "Large Mouse Cursor", "Increase cursor size for visibility.", "L", "Configure", func() -> void:
+		Sh.open_kcm("kcm_cursortheme")
+	)
+	
+	action_row(c4, "Screen Reader (Orca)", "Enable/disable screen reader.", "S", "Toggle", func() -> void:
+		if Sh.has_tool("orca"):
+			Sh.run("orca &")
+		else:
+			notify("Orca not installed. Install with: pkexec apt install orca")
+	)
+
+
+func _on_high_contrast_toggled(enabled: bool) -> void:
+	Sh.set_high_contrast(enabled)
+	notify("High Contrast Mode: " + ("Enabled" if enabled else "Disabled") + ". Restart apps to see changes.")
+
+
+func _on_scale_changed(idx: int) -> void:
+	var scales := ["1.0", "1.25", "1.5", "1.75", "2.0"]
+	var scale := scales[idx]
+	Sh.kde_write("kdeglobals", "KScreen", "ScaleFactor", scale)
+	Sh.kde_write("kdeglobals", "KDE", "ForceFontDPI", str(int(float(scale) * 96)))
+	Sh.run("systemctl --user restart plasma-kaccess.service >/dev/null 2>&1 &")
+	Sh.run("plasmashell --replace >/dev/null 2>&1 &")
+	notify("UI scale set to " + str(int(float(scale) * 100)) + "%. Restart session to fully apply.")
+
 
 func _choice_row_dirs(card_box: VBoxContainer, title: String, subtitle: String, glyph: String,
 		options: Array, current: String, on_select: Callable) -> void:
