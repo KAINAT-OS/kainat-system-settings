@@ -137,7 +137,7 @@ func _change_password() -> void:
 func _build_password_dialog() -> void:
 	_pw_dialog = ConfirmationDialog.new()
 	_pw_dialog.title = "Change Password"
-	_pw_dialog.ok_text = "Change Password"
+	_pw_dialog.ok_button_text = "Change Password"
 	_pw_dialog.add_cancel_button("Cancel")
 
 	var box := VBoxContainer.new()

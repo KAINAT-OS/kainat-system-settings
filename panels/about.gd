@@ -274,8 +274,8 @@ func _run_diagnostics() -> void:
 	# Show results
 	var dialog := AcceptDialog.new()
 	dialog.title = "System Diagnostics"
-	dialog.text = output.strip_edges()
-	dialog.ok_text = "OK"
+	dialog.dialog_text = output.strip_edges()
+	dialog.ok_button_text = "OK"
 	dialog.min_size = Vector2(500, 400)
 	get_tree().root.add_child(dialog)
 	dialog.popup_centered()
@@ -285,8 +285,8 @@ func _run_diagnostics() -> void:
 func _reset_settings() -> void:
 	var dialog := ConfirmationDialog.new()
 	dialog.title = "Reset System Settings?"
-	dialog.text = "This will reset your user configuration files:\n• ~/.config/*\n• ~/.local/share/config/*\n\nNothing is deleted. The old files are moved to a timestamped backup folder in your home directory, so you can restore them if needed.\n\nYour personal files (Documents, Downloads, Pictures, etc.) will NOT be touched.\n\nYou will need to log out and back in for changes to take full effect."
-	dialog.ok_text = "Reset Settings"
+	dialog.dialog_text = "This will reset your user configuration files:\n• ~/.config/*\n• ~/.local/share/config/*\n\nNothing is deleted. The old files are moved to a timestamped backup folder in your home directory, so you can restore them if needed.\n\nYour personal files (Documents, Downloads, Pictures, etc.) will NOT be touched.\n\nYou will need to log out and back in for changes to take full effect."
+	dialog.ok_button_text = "Reset Settings"
 	dialog.add_cancel_button("Cancel")
 	
 	add_child(dialog)
@@ -307,8 +307,8 @@ func _on_reset_confirmed(dialog: ConfirmationDialog) -> void:
 		return
 	var done := AcceptDialog.new()
 	done.title = "Settings Reset"
-	done.text = "Your settings were reset.\n\nA backup of the old configuration is here:\n" + backup + "\n\nLog out and back in for the changes to take full effect."
-	done.ok_text = "Open Backup Folder"
+	done.dialog_text = "Your settings were reset.\n\nA backup of the old configuration is here:\n" + backup + "\n\nLog out and back in for the changes to take full effect."
+	done.ok_button_text = "Open Backup Folder"
 	done.add_cancel_button("Close")
 	add_child(done)
 	done.popup_centered()
@@ -366,8 +366,8 @@ func _show_logs_dialog() -> void:
 
 	var dialog := AcceptDialog.new()
 	dialog.title = "Logs Collected"
-	dialog.text = "System logs saved to:\n" + _last_log_dir + "\n\nYou can attach these when reporting issues."
-	dialog.ok_text = "Open Folder"
+	dialog.dialog_text = "System logs saved to:\n" + _last_log_dir + "\n\nYou can attach these when reporting issues."
+	dialog.ok_button_text = "Open Folder"
 	dialog.add_cancel_button("Close")
 
 	add_child(dialog)

@@ -91,8 +91,8 @@ func _uptime() -> String:
 func _confirm(title: String, text: String, ok: String, on_yes: Callable) -> void:
 	var dialog := ConfirmationDialog.new()
 	dialog.title = title
-	dialog.text = text
-	dialog.ok_text = ok
+	dialog.dialog_text = text
+	dialog.ok_button_text = ok
 	dialog.add_cancel_button("Cancel")
 	dialog.confirmed.connect(func() -> void: on_yes.call())
 	get_tree().root.add_child(dialog)

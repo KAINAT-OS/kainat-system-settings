@@ -191,8 +191,8 @@ func _on_vpn_file_selected(path: String) -> void:
 func _confirm_overwrite(source: String, dest: String) -> void:
 	var dialog := ConfirmationDialog.new()
 	dialog.title = "Replace existing config?"
-	dialog.text = dest.get_file() + " already exists.\n\nReplace it with the selected file?"
-	dialog.ok_text = "Replace"
+	dialog.dialog_text = dest.get_file() + " already exists.\n\nReplace it with the selected file?"
+	dialog.ok_button_text = "Replace"
 	dialog.add_cancel_button("Cancel")
 	dialog.confirmed.connect(func() -> void: _copy_config(source, dest))
 	get_tree().root.add_child(dialog)
@@ -286,8 +286,8 @@ func _on_remove() -> void:
 
 	var dialog := ConfirmationDialog.new()
 	dialog.title = "Remove VPN?"
-	dialog.text = "Remove " + name + " from the list?\n\nConfig files will be deleted."
-	dialog.ok_text = "Remove"
+	dialog.dialog_text = "Remove " + name + " from the list?\n\nConfig files will be deleted."
+	dialog.ok_button_text = "Remove"
 	dialog.add_cancel_button("Cancel")
 	dialog.confirmed.connect(func() -> void:
 		var kind := str(item_data.get("type", ""))

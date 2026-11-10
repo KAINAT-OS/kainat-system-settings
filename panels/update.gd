@@ -113,7 +113,7 @@ func _refresh_sources() -> void:
 func _on_add_repo() -> void:
 	var dialog := ConfirmationDialog.new()
 	dialog.title = "Add Repository"
-	dialog.ok_text = "Add"
+	dialog.ok_button_text = "Add"
 	dialog.add_cancel_button("Cancel")
 	
 	var vbox := VBoxContainer.new()
@@ -169,7 +169,7 @@ func _on_remove_repo() -> void:
 	var dialog := ConfirmationDialog.new()
 	dialog.title = "Remove Repository"
 	dialog.dialog_text = "Delete " + name + "?\n\nPackages installed from it stay installed, but they will stop receiving updates."
-	dialog.ok_text = "Remove"
+	dialog.ok_button_text = "Remove"
 	dialog.add_cancel_button("Cancel")
 	dialog.confirmed.connect(func() -> void:
 		run_async(Sh.remove_apt_source_command(file), func(code: int) -> void:

@@ -279,9 +279,9 @@ func _remove_selected() -> void:
 		return
 	var dialog := ConfirmationDialog.new()
 	dialog.title = "Remove Package?"
-	dialog.text = "Remove " + name + " from this computer?\n\n" \
+	dialog.dialog_text = "Remove " + name + " from this computer?\n\n" \
 		+ "Packages that depend on it may be removed too."
-	dialog.ok_text = "Remove"
+	dialog.ok_button_text = "Remove"
 	dialog.add_cancel_button("Cancel")
 	dialog.confirmed.connect(func() -> void:
 		notify("Removing " + name + "…")

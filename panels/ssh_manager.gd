@@ -232,8 +232,8 @@ func _on_view_key() -> void:
 
 	var dialog := AcceptDialog.new()
 	dialog.title = "Public Key: " + str(item_data.get("file", ""))
-	dialog.text = pub_key
-	dialog.ok_text = "Close"
+	dialog.dialog_text = pub_key
+	dialog.ok_button_text = "Close"
 	dialog.min_size = Vector2(600, 200)
 	get_tree().root.add_child(dialog)
 	dialog.popup_centered()
@@ -252,8 +252,8 @@ func _on_remove_key() -> void:
 
 	var dialog := ConfirmationDialog.new()
 	dialog.title = "Remove Key?"
-	dialog.text = "Permanently delete " + name + " and " + name + ".pub?\n\nThis cannot be undone."
-	dialog.ok_text = "Delete"
+	dialog.dialog_text = "Permanently delete " + name + " and " + name + ".pub?\n\nThis cannot be undone."
+	dialog.ok_button_text = "Delete"
 	dialog.add_cancel_button("Cancel")
 	dialog.confirmed.connect(func() -> void:
 		var code := Sh.run_wait("rm -f " + Sh.quote(key_path) + " " + Sh.quote(key_path + ".pub"))

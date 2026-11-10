@@ -164,7 +164,7 @@ func _apply_proxy() -> void:
 func _create_hotspot() -> void:
 	var dialog := ConfirmationDialog.new()
 	dialog.title = "Create WiFi Hotspot"
-	dialog.ok_text = "Create"
+	dialog.ok_button_text = "Create"
 	dialog.add_cancel_button("Cancel")
 
 	var vbox := VBoxContainer.new()

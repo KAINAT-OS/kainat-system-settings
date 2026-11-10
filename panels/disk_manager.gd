@@ -129,8 +129,8 @@ func _build_disk_card(dev: Dictionary) -> void:
 func _on_eject(device: String) -> void:
 	var dialog := AcceptDialog.new()
 	dialog.title = "Eject " + device + "?"
-	dialog.text = "This will unmount all partitions and power off the device.\n\nAre you sure?"
-	dialog.ok_text = "Eject"
+	dialog.dialog_text = "This will unmount all partitions and power off the device.\n\nAre you sure?"
+	dialog.ok_button_text = "Eject"
 	dialog.confirmed.connect(func() -> void:
 		notify("Ejecting " + device + "...")
 		var code := Sh.eject_drive(device)
@@ -148,8 +148,8 @@ func _on_eject(device: String) -> void:
 func _on_format(device: String, size: String) -> void:
 	var dialog := ConfirmationDialog.new()
 	dialog.title = "Format " + device + "?"
-	dialog.text = "WARNING: This will ERASE ALL DATA on " + device + " (" + size + ").\n\nThis action cannot be undone."
-	dialog.ok_text = "Format"
+	dialog.dialog_text = "WARNING: This will ERASE ALL DATA on " + device + " (" + size + ").\n\nThis action cannot be undone."
+	dialog.ok_button_text = "Format"
 	dialog.add_cancel_button("Cancel")
 	
 	# Filesystem selector
