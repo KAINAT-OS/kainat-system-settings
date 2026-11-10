@@ -4,6 +4,10 @@ extends SettingsPanel
 var _account_card: VBoxContainer
 var _groups_row: HBoxContainer
 var _avatar_dialog: FileDialog = null
+var _pw_dialog: ConfirmationDialog = null
+var _pw_new: LineEdit = null
+var _pw_confirm: LineEdit = null
+var _pw_error: Label = null
 
 
 func build() -> void:
@@ -31,11 +35,19 @@ func build() -> void:
 	var c2 := card()
 	kcm_row(c2, "User Accounts", "Create, edit and remove users.", "U", "kcm_users")
 	kcm_row(c2, "Online Accounts", "Google, Microsoft and OwnCloud.", "O", "kcm_kaccounts")
-	kcm_row(c2, "KDE Wallet", "Stored credentials and secrets.", "W", "kcm_kwallet5")
+	nav_row(c2, "KDE Wallet", "Stored credentials and secrets.", "W", _open_wallet)
 	kcm_row(c2, "Activities", "Task-focused workspaces.", "A", "kcm_activities")
 	kcm_row(c2, "User Feedback", "Send anonymous usage statistics.", "F", "kcm_feedback")
 
 	defer(_populate)
+
+
+func _open_wallet() -> void:
+	for tool in ["kwalletmanager5", "kwalletmanager6", "kwalletmanager"]:
+		if Sh.has_tool(tool):
+			Sh.launch(tool)
+			return
+	KainatShell.open_kcm("kcm_kwallet5")
 
 
 func _populate() -> void:
@@ -106,18 +118,101 @@ func _group_members(group: String) -> Array:
 
 # --- password ---------------------------------------------------------------
 
-func _change_password() -> void:
+func _username() -> String:
 	var user := Sh.run_capture("whoami").strip_edges()
-	if Sh.has_tool("konsole"):
-		# passwd is interactive — run it inside a terminal window.
-		Sh.run("konsole -e passwd " + Sh.quote(user) + " >/dev/null 2>&1 &")
-		notify("A terminal opened — enter your new password there.")
-	elif Sh.has_tool("xterm"):
-		Sh.run("xterm -e passwd " + Sh.quote(user) + " >/dev/null 2>&1 &")
-		notify("A terminal opened — enter your new password there.")
-	else:
-		notify(Sh._notify_missing("konsole or xterm", "Password change")
-			+ " Open any terminal and run: passwd")
+	return user if not user.is_empty() else OS.get_environment("USER")
+
+
+func _change_password() -> void:
+	if _pw_dialog == null or not is_instance_valid(_pw_dialog):
+		_build_password_dialog()
+	_pw_new.text = ""
+	_pw_confirm.text = ""
+	_pw_error.text = ""
+	_pw_dialog.get_ok_button().disabled = true
+	_pw_dialog.popup_centered(Vector2i(440, 0))
+	_pw_new.grab_focus()
+
+
+func _build_password_dialog() -> void:
+	_pw_dialog = ConfirmationDialog.new()
+	_pw_dialog.title = "Change Password"
+	_pw_dialog.ok_text = "Change Password"
+	_pw_dialog.add_cancel_button("Cancel")
+
+	var box := VBoxContainer.new()
+	box.custom_minimum_size = Vector2(400, 0)
+	box.add_theme_constant_override("separation", 8)
+	_pw_dialog.add_child(box)
+
+	var hint := Label.new()
+	hint.text = "New password for " + _username() + ":"
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(hint)
+
+	_pw_new = LineEdit.new()
+	_pw_new.secret = true
+	_pw_new.placeholder_text = "New password"
+	_pw_new.text_changed.connect(func(_t: String) -> void: _validate_password())
+	box.add_child(_pw_new)
+
+	_pw_confirm = LineEdit.new()
+	_pw_confirm.secret = true
+	_pw_confirm.placeholder_text = "Repeat new password"
+	_pw_confirm.text_changed.connect(func(_t: String) -> void: _validate_password())
+	_pw_confirm.text_submitted.connect(func(_t: String) -> void: _validate_password())
+	box.add_child(_pw_confirm)
+
+	_pw_error = Label.new()
+	_pw_error.add_theme_color_override("font_color", Color(0.92, 0.38, 0.35))
+	_pw_error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(_pw_error)
+
+	_pw_dialog.confirmed.connect(_apply_password)
+	add_child(_pw_dialog)
+
+
+func _validate_password() -> void:
+	var ok := true
+	var message := ""
+	if _pw_new.text.length() < 8:
+		message = "Use at least 8 characters."
+		ok = false
+	elif _pw_new.text == _username():
+		message = "The password cannot be your username."
+		ok = false
+	elif _pw_new.text != _pw_confirm.text:
+		message = "The two passwords do not match."
+		ok = false
+	_pw_error.text = message
+	_pw_dialog.get_ok_button().disabled = not ok
+
+
+func _apply_password() -> void:
+	var user := _username()
+	var dir := "/tmp/kainat-pw-" + str(Time.get_ticks_usec())
+	# The secret goes into a file inside a 0700 directory so no other user can
+	# read it, and chpasswd consumes it as root. The directory is removed as
+	# soon as the command finishes (success or not).
+	if Sh.run_wait("mkdir -m 700 " + Sh.quote(dir)) != 0:
+		notify("Could not prepare the password change.")
+		return
+	var path := dir + "/entry"
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f == null:
+		Sh.run_wait("rm -rf " + Sh.quote(dir))
+		notify("Could not prepare the password change.")
+		return
+	f.store_string(user + ":" + _pw_new.text + "\n")
+	f.close()
+
+	notify("Changing password…")
+	run_async("pkexec sh -c 'chpasswd < \"$1\"' sh " + Sh.quote(path)
+		+ "; rm -rf " + Sh.quote(dir), func(code: int) -> void:
+			if code == 0:
+				notify("Password changed.")
+			else:
+				notify("Could not change the password."))
 
 
 # --- avatar -----------------------------------------------------------------

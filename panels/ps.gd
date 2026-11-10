@@ -57,8 +57,11 @@ func _populate_profile() -> void:
 		var selected: int = profiles.find(current)
 		choice_row(c, "Profile", "Balance performance and battery life.", "P", profiles,
 			selected, func(index: int) -> void:
-				Sh.run("powerprofilesctl set " + Sh.quote(str(profiles[index])))
-				notify("Power profile: " + str(profiles[index])))
+				var profile: String = str(profiles[index])
+				if Sh.run_wait("powerprofilesctl set " + Sh.quote(profile)) == 0:
+					notify("Power profile: " + profile)
+				else:
+					notify("Could not switch to the " + profile + " profile."))
 	else:
 		unavailable_row(c, "Power Profiles", "power-profiles-daemon is not installed")
 
@@ -73,8 +76,13 @@ func _populate_cpu() -> void:
 				var mode: String = str(governors[index])
 				# The governor name is written inside a pkexec shell command, so
 				# quote the whole inner command rather than nesting quotes.
-				Sh.run("pkexec sh -c " + Sh.quote("echo " + mode + " | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor"))
-				notify("CPU governor: " + mode))
+				var code := Sh.run_wait("pkexec sh -c " + Sh.quote(
+					"printf '%s' " + Sh.quote(mode)
+					+ " | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null"))
+				if code == 0:
+					notify("CPU governor: " + mode)
+				else:
+					notify("Could not set the CPU governor to " + mode + "."))
 	else:
 		unavailable_row(c2, "CPU Governor", "The kernel does not expose cpufreq")
 	info_row(c2, "Battery", _battery())
@@ -125,14 +133,14 @@ func _governors() -> Array:
 	var raw: String = Sh.run_capture("cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors 2>/dev/null").strip_edges()
 	if raw.is_empty():
 		return []
-	return Array(raw.split(" "))
+	return Array(raw.split(" ", false))
 
 
 func _battery() -> String:
 	for line in Sh.run_lines("upower -e 2>/dev/null"):
 		if line.contains("battery") or line.contains("BAT"):
-			for detail in Sh.run_lines("upower -i " + line + " 2>/dev/null"):
-				if detail.contains("percentage"):
+			for detail in Sh.run_lines("upower -i " + Sh.quote(line) + " 2>/dev/null"):
+				if detail.contains("percentage") and detail.contains(":"):
 					return detail.split(":", true, 1)[1].strip_edges()
 	return "No battery (desktop)"
 

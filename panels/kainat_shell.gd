@@ -428,6 +428,10 @@ static func install_package(package: String) -> int:
 	return run_wait(install_command(package))
 
 
+static func remove_command(package: String) -> String:
+	return "pkexec apt-get remove -y -- " + quote(package)
+
+
 # --- disk manager helpers ---------------------------------------------------
 
 static func list_block_devices() -> Array:
@@ -472,7 +476,9 @@ static func eject_drive(device: String) -> int:
 	return run_wait("udisksctl power-off -b " + quote(device))
 
 
-static func format_drive(device: String, fs: String) -> int:
+# Command form so a caller can run it non-blocking; format_drive() is the
+# blocking convenience wrapper.
+static func format_command(device: String, fs: String) -> String:
 	# fs: vfat (FAT32), ntfs, ext4
 	var cmd: String = ""
 	match fs:
@@ -483,8 +489,15 @@ static func format_drive(device: String, fs: String) -> int:
 		"ext4":
 			cmd = "mkfs.ext4 -F " + quote(device)
 		_:
-			return -1
-	return run_wait("pkexec " + cmd)
+			return ""
+	return "pkexec " + cmd
+
+
+static func format_drive(device: String, fs: String) -> int:
+	var command := format_command(device, fs)
+	if command.is_empty():
+		return -1
+	return run_wait(command)
 
 
 # --- VPN helpers ------------------------------------------------------------
@@ -686,11 +699,14 @@ static func run_appimage(path: String) -> int:
 	return 0
 
 
-static func run_wine_exe(path: String) -> int:
+static func run_wine_exe(path: String, prefix: String = "") -> int:
 	# Wine must run as the user: a root-owned prefix breaks the user's setup.
 	if not has_tool("wine"):
 		return 127
-	run("wine " + quote(path) + " >/dev/null 2>&1 &")
+	var command := "wine " + quote(path)
+	if not prefix.is_empty():
+		command = "WINEPREFIX=" + quote(prefix) + " " + command
+	run(command + " >/dev/null 2>&1 &")
 	return 0
 
 

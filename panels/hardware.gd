@@ -86,7 +86,7 @@ func _populate() -> void:
 	# CPU Freq (if available)
 	var freq_label := Label.new()
 	freq_label.name = "live_freq"
-	var freq_output := Sh.run_capture("cat /proc/cpuinfo | grep 'cpu MHz' | head -1 | awk '{print $4}'").strip_edges()
+	var freq_output := _cpu_freq_mhz()
 	if not freq_output.is_empty():
 		freq_label.text = "CPU Freq: " + freq_output + " MHz"
 	else:
@@ -117,6 +117,10 @@ func _populate() -> void:
 
 
 func _update_live_stats(labels: Dictionary) -> void:
+	# The router hides panels rather than freeing them, so skip the shell
+	# probes entirely while this page is not on screen.
+	if not is_visible_in_tree():
+		return
 	var temps: Array = _temperature_readings()
 	var cpu_c: float = _cpu_celsius(temps)
 	var hot_c: float = _hottest_celsius(temps)
@@ -132,9 +136,21 @@ func _update_live_stats(labels: Dictionary) -> void:
 	if not disk.is_empty() and labels.has("disk") and is_instance_valid(labels["disk"]):
 		labels["disk"].text = "Disk (root): " + disk + " used"
 	
-	var freq_output := Sh.run_capture("cat /proc/cpuinfo | grep 'cpu MHz' | head -1 | awk '{print $4}'").strip_edges()
+	var freq_output := _cpu_freq_mhz()
 	if not freq_output.is_empty() and labels.has("freq") and is_instance_valid(labels["freq"]):
 		labels["freq"].text = "CPU Freq: " + freq_output + " MHz"
+
+
+# Reads the cpufreq sysfs node directly (no process spawn); falls back to
+# /proc/cpuinfo, which is also read in-process.
+func _cpu_freq_mhz() -> String:
+	var raw := Sh.read_text("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq").strip_edges()
+	if raw.is_valid_int():
+		return "%.0f" % (float(raw.to_int()) / 1000.0)
+	for line in Sh.read_text("/proc/cpuinfo").split("\n"):
+		if line.begins_with("cpu MHz") and line.contains(":"):
+			return line.split(":", true, 1)[1].strip_edges()
+	return ""
 
 
 func _show_list(title: String, text: String) -> void:

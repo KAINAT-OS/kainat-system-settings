@@ -174,13 +174,15 @@ func _on_format(device: String, size: String) -> void:
 			return
 		notify("Formatting " + device + " as " + fs + "...")
 		# mkfs refuses to touch a mounted device; unmount it and any children.
+		# mkfs itself can take a while on a large drive, so run it off the main
+		# thread and report the result when it finishes.
 		Sh.unmount_device(device)
-		var code := Sh.format_drive(device, fs)
-		if code == 0:
-			notify(device + " formatted successfully as " + fs)
-			_populate()
-		else:
-			notify("Format failed. Is the drive in use?"))
+		run_async(Sh.format_command(device, fs), func(code: int) -> void:
+			if code == 0:
+				notify(device + " formatted successfully as " + fs)
+				_populate()
+			else:
+				notify("Format failed. Is the drive in use?")))
 	get_tree().root.add_child(dialog)
 	dialog.popup_centered()
 	dialog.confirmed.connect(dialog.queue_free)
@@ -191,13 +193,25 @@ func _on_health(device: String) -> void:
 	if not Sh.has_tool("smartctl"):
 		notify("SMART tools are not installed. Install smartmontools first.")
 		return
-	notify("Checking SMART data for " + device + "...")
-	var output := Sh.run_capture("pkexec smartctl -H " + Sh.quote(device) + " 2>&1")
-	
+	notify("Checking SMART data for " + device + "… this can take a moment.")
+	run_async_capture("pkexec smartctl -H " + Sh.quote(device), func(code: int, output: String) -> void:
+		var text := output.strip_edges()
+		if text.is_empty():
+			text = "Could not read SMART data."
+		elif code != 0:
+			text += "\n\n(smartctl exited with status " + str(code) + ")"
+		_show_smart(device, text))
+
+
+func _show_smart(device: String, text: String) -> void:
 	var result_dialog := AcceptDialog.new()
 	result_dialog.title = "SMART Health: " + device
-	result_dialog.text = "Could not read SMART data." if output.strip_edges().is_empty() else output
-	result_dialog.ok_text = "OK"
+	result_dialog.size = Vector2i(720, 520)
+	var edit := TextEdit.new()
+	edit.text = text
+	edit.editable = false
+	edit.custom_minimum_size = Vector2(680, 460)
+	result_dialog.add_child(edit)
 	get_tree().root.add_child(result_dialog)
 	result_dialog.popup_centered()
 	result_dialog.confirmed.connect(result_dialog.queue_free)

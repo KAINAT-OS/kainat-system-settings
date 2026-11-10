@@ -12,6 +12,8 @@ var _package_lower: PackedStringArray = []
 var _apt_stamp: int = -1
 var _results: ItemList
 var _app_defaults_card: VBoxContainer
+var _install_btn: Button = null
+var _remove_btn: Button = null
 
 
 func build() -> void:
@@ -91,15 +93,28 @@ func _show_app_manager() -> void:
 	refresh_btn.text = "Refresh list"
 	actions.add_child(refresh_btn)
 
+	var remove_btn := Button.new()
+	remove_btn.text = "Remove selected"
+	remove_btn.disabled = true
+	actions.add_child(remove_btn)
+	_remove_btn = remove_btn
+
 	var install_btn := Button.new()
 	install_btn.text = "Install selected"
 	install_btn.disabled = true
 	actions.add_child(install_btn)
+	_install_btn = install_btn
 
 	search.text_changed.connect(func(text: String) -> void: _search_packages(text))
 	search.text_submitted.connect(func(text: String) -> void: _search_packages(text))
-	_results.item_selected.connect(func(_i: int) -> void: install_btn.disabled = false)
-	install_btn.pressed.connect(func() -> void: _install_selected())
+	_results.item_selected.connect(func(_i: int) -> void:
+		install_btn.disabled = false
+		remove_btn.disabled = false)
+	_results.nothing_selected.connect(func() -> void:
+		install_btn.disabled = true
+		remove_btn.disabled = true)
+	install_btn.pressed.connect(_install_selected)
+	remove_btn.pressed.connect(_remove_selected)
 	refresh_btn.pressed.connect(func() -> void:
 		if _rebuild_package_cache():
 			notify("Package list refreshed (%d packages)." % _package_cache.size())
@@ -117,6 +132,7 @@ func _show_app_manager() -> void:
 
 func _search_packages(query: String) -> void:
 	_results.clear()
+	_set_busy(false)
 	var trimmed := query.strip_edges()
 	if trimmed.length() < 2:
 		# Header-only read: no need to load 85k names just for this hint.
@@ -244,17 +260,65 @@ func _header_int(header: String, key: String) -> int:
 
 
 func _install_selected() -> void:
-	var selected: PackedInt32Array = _results.get_selected_items()
-	if selected.is_empty():
-		return
-	var name: String = _results.get_item_text(selected[0]).strip_edges()
-	# Placeholder rows ("No packages match …") are selectable too, and quoting
-	# alone still lets a leading '-' be read as an option.
-	if not _valid_package_name(name):
-		notify("Not a package name: " + name)
+	var name := _selected_package()
+	if name.is_empty():
 		return
 	notify("Installing " + name + "…")
-	Sh.run("pkexec apt-get install -y -- " + Sh.quote(name))
+	_set_busy(true)
+	run_async("pkexec apt-get install -y -- " + Sh.quote(name), func(code: int) -> void:
+		_set_busy(false)
+		if code == 0:
+			notify(name + " installed.")
+		else:
+			notify("Could not install " + name + "."))
+
+
+func _remove_selected() -> void:
+	var name := _selected_package()
+	if name.is_empty():
+		return
+	var dialog := ConfirmationDialog.new()
+	dialog.title = "Remove Package?"
+	dialog.text = "Remove " + name + " from this computer?\n\n" \
+		+ "Packages that depend on it may be removed too."
+	dialog.ok_text = "Remove"
+	dialog.add_cancel_button("Cancel")
+	dialog.confirmed.connect(func() -> void:
+		notify("Removing " + name + "…")
+		_set_busy(true)
+		run_async(Sh.remove_command(name), func(code: int) -> void:
+			_set_busy(false)
+			if code == 0:
+				notify(name + " removed.")
+			else:
+				notify("Could not remove " + name + ".")))
+	get_tree().root.add_child(dialog)
+	dialog.popup_centered()
+	dialog.confirmed.connect(dialog.queue_free)
+	dialog.canceled.connect(dialog.queue_free)
+
+
+# The selected row as a validated package name, or "" for placeholder rows
+# ("No packages match …") which are selectable too.
+func _selected_package() -> String:
+	if _results == null or not is_instance_valid(_results):
+		return ""
+	var selected: PackedInt32Array = _results.get_selected_items()
+	if selected.is_empty():
+		return ""
+	var name: String = _results.get_item_text(selected[0]).strip_edges()
+	# Quoting alone still lets a leading '-' be read as an option.
+	if not _valid_package_name(name):
+		notify("Not a package name: " + name)
+		return ""
+	return name
+
+
+func _set_busy(busy: bool) -> void:
+	if _install_btn != null and is_instance_valid(_install_btn):
+		_install_btn.disabled = busy
+	if _remove_btn != null and is_instance_valid(_remove_btn):
+		_remove_btn.disabled = busy
 
 
 # Debian policy package names: start alphanumeric, then [a-z0-9+.-], with an

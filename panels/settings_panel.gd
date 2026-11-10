@@ -95,6 +95,59 @@ func run_async(command: String, on_done: Callable) -> void:
 	timer.start()
 
 
+# Like run_async(), but also captures the command's combined output so the
+# caller can show it in a dialog. Used for slow probes such as smartctl.
+func run_async_capture(command: String, on_done: Callable) -> void:
+	var stamp := str(Time.get_ticks_usec())
+	var out_file := "/tmp/kainat-task-" + stamp + ".out"
+	var status_file := "/tmp/kainat-task-" + stamp + ".status"
+	var pid := OS.create_process("bash", ["-c",
+		"(" + command + ") > " + Sh.quote(out_file) + " 2>&1\nprintf '%s' $? > "
+		+ Sh.quote(status_file)])
+	if pid <= 0:
+		on_done.call(-1, "")
+		return
+
+	var timer := Timer.new()
+	timer.wait_time = 0.4
+	add_child(timer)
+	var poll := func() -> void:
+		if not FileAccess.file_exists(status_file):
+			return
+		timer.stop()
+		timer.queue_free()
+		var code := FileAccess.get_file_as_string(status_file).strip_edges().to_int()
+		var text := FileAccess.get_file_as_string(out_file)
+		DirAccess.remove_absolute(status_file)
+		DirAccess.remove_absolute(out_file)
+		on_done.call(code, text)
+	timer.timeout.connect(poll)
+	timer.start()
+
+
+# Coalesce rapid changes (a slider drag fires ~100 events) into one command so
+# the shell is not flooded with one process per pixel. The newest task wins.
+var _debounce_timers: Dictionary = {}
+var _debounce_pending: Dictionary = {}
+
+
+func debounce(key: String, delay: float, task: Callable) -> void:
+	_debounce_pending[key] = task
+	var timer := _debounce_timers.get(key) as Timer
+	if timer == null or not is_instance_valid(timer):
+		timer = Timer.new()
+		timer.one_shot = true
+		timer.wait_time = delay
+		timer.timeout.connect(func() -> void:
+			var pending: Variant = _debounce_pending.get(key)
+			_debounce_pending.erase(key)
+			if pending is Callable:
+				(pending as Callable).call())
+		add_child(timer)
+		_debounce_timers[key] = timer
+	timer.start()
+
+
 # --- theming helpers --------------------------------------------------------
 
 func _accent() -> Color:

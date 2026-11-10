@@ -1,7 +1,9 @@
 extends SettingsPanel
-# Display & monitor settings. Brightness is applied through Plasma's
-# PowerDevil DBus API, which drives the real backlight on both Wayland and
-# X11; complex multi-monitor/color work is delegated to KDE KCMs.
+# Display & monitor settings. Outputs, modes and scaling come from
+# kscreen-doctor, which works on both Wayland and X11 (xrandr only reports the
+# real picture on X11). Brightness is applied through Plasma's PowerDevil DBus
+# API, which drives the real backlight on both session types; complex
+# multi-monitor/color work is delegated to the KDE KCMs.
 
 const POWERDEVIL_SERVICE := "org.kde.org_kde_powerdevil"
 const BRIGHTNESS_PATH := "/org/kde/ScreenBrightness"
@@ -15,20 +17,33 @@ var _brightness_max := 0.0
 func build() -> void:
 	page_header("Displays", "Configure monitors, brightness, color and night light.")
 
-	var outputs: Array = _connected_outputs()
-	var primary: String = str(outputs[0]) if outputs.size() > 0 else ""
+	var outputs: Array = _kscreen_outputs()
+	if outputs.is_empty():
+		outputs = _xrandr_outputs()
+	var connected: Array = []
+	var primary := ""
+	for o in outputs:
+		if not bool(o["connected"]):
+			continue
+		connected.append(str(o["name"]))
+		if primary.is_empty() and bool(o["enabled"]):
+			primary = str(o["name"])
+	if primary.is_empty() and not connected.is_empty():
+		primary = str(connected[0])
+
 	_init_brightness()
 
 	info_tiles([
-		{"value": str(outputs.size()), "label": "Connected displays"},
-		{"value": _primary_resolution(), "label": "Primary resolution"},
+		{"value": str(connected.size()), "label": "Connected displays"},
+		{"value": _primary_resolution(outputs), "label": "Primary resolution"},
 		{"value": primary if not primary.is_empty() else UNAVAILABLE, "label": "Primary output"},
 	])
 
 	section("Brightness")
 	var c := card()
 	slider_row(c, "Screen brightness", "Adjust the primary display backlight.", "B", 10, 100,
-		_current_brightness(), func(v: float) -> void: _set_brightness(primary, v), "%")
+		_current_brightness(), func(v: float) -> void:
+			debounce("brightness", 0.08, func() -> void: _set_brightness(primary, v)), "%")
 
 	_build_resolution_section()
 
@@ -44,18 +59,108 @@ func build() -> void:
 	kcm_row(c3, "Screen Edges", "Active screen corners and edges.", "S", "kcm_kwinscreenedges")
 
 
-func _connected_outputs() -> Array:
+# --- output discovery -------------------------------------------------------
+
+# Parses `kscreen-doctor -j`. Returns [{name, connected, enabled,
+# current_mode_id, modes: [{id, label}], scale, resolution}]. Duplicate mode
+# labels are collapsed because panels report the same size/refresh more than
+# once (49 modes here for a single 1080p panel).
+func _kscreen_outputs() -> Array:
+	var raw := Sh.run_capture("kscreen-doctor -j 2>/dev/null")
+	if raw.strip_edges().is_empty():
+		return []
+	var data: Variant = JSON.parse_string(raw)
+	if typeof(data) != TYPE_DICTIONARY:
+		return []
+	var list: Variant = (data as Dictionary).get("outputs", [])
+	if typeof(list) != TYPE_ARRAY:
+		return []
+
 	var outputs: Array = []
-	var out: String = Sh.run_capture("xrandr --query 2>/dev/null")
-	for line in out.split("\n"):
-		if line.contains(" connected"):
-			var parts: PackedStringArray = line.split(" ", false)
-			if parts.size() > 0:
-				outputs.append(parts[0])
+	for item in (list as Array):
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		var o: Dictionary = item
+
+		var modes: Array = []
+		var seen: Dictionary = {}
+		var mode_list: Variant = o.get("modes", [])
+		if typeof(mode_list) == TYPE_ARRAY:
+			for m in (mode_list as Array):
+				if typeof(m) != TYPE_DICTIONARY:
+					continue
+				var md: Dictionary = m
+				var label := str(md.get("name", "")).strip_edges()
+				if label.is_empty() or seen.has(label):
+					continue
+				seen[label] = true
+				modes.append({"id": str(md.get("id", "")), "label": label})
+
+		var resolution := ""
+		var size: Variant = o.get("size", {})
+		if typeof(size) == TYPE_DICTIONARY:
+			var sd: Dictionary = size
+			var w := int(sd.get("width", 0))
+			var h := int(sd.get("height", 0))
+			if w > 0 and h > 0:
+				resolution = "%dx%d" % [w, h]
+
+		outputs.append({
+			"name": str(o.get("name", "")),
+			"connected": bool(o.get("connected", false)),
+			"enabled": bool(o.get("enabled", false)),
+			"current_mode_id": str(o.get("currentModeId", "")),
+			"modes": modes,
+			"scale": float(o.get("scale", 1.0)),
+			"resolution": resolution,
+		})
 	return outputs
 
 
-# --- resolution & scaling (kscreen-doctor) ----------------------------------
+# Fallback for a session where kscreen-doctor is missing. xrandr only sees the
+# real mode list on X11, so this is a last resort, not the primary source.
+func _xrandr_outputs() -> Array:
+	var outputs: Array = []
+	for line in Sh.run_capture("xrandr --query 2>/dev/null").split("\n"):
+		if not line.contains(" connected"):
+			continue
+		var parts: PackedStringArray = line.split(" ", false)
+		if parts.is_empty():
+			continue
+		var resolution := ""
+		for token in parts:
+			if token.contains("x") and token.contains("+"):
+				resolution = token.split("+")[0]
+				break
+		outputs.append({
+			"name": parts[0],
+			"connected": true,
+			"enabled": resolution != "",
+			"current_mode_id": "",
+			"modes": [],
+			"scale": 1.0,
+			"resolution": resolution,
+		})
+	return outputs
+
+
+func _primary_resolution(outputs: Array) -> String:
+	for o in outputs:
+		if bool(o["enabled"]) and not str(o["resolution"]).is_empty():
+			return str(o["resolution"])
+	return UNAVAILABLE
+
+
+# First connected, enabled output that reports modes.
+func _active_output() -> Dictionary:
+	for o in _kscreen_outputs():
+		if bool(o["connected"]) and bool(o["enabled"]) \
+				and not (o["modes"] as Array).is_empty():
+			return o
+	return {}
+
+
+# --- resolution & scaling ---------------------------------------------------
 
 func _build_resolution_section() -> void:
 	section("Resolution & Scaling")
@@ -63,26 +168,29 @@ func _build_resolution_section() -> void:
 	if not Sh.has_tool("kscreen-doctor"):
 		unavailable_row(c, "Resolution & Scaling", "kscreen-doctor is not installed")
 		return
-	var out: Dictionary = _primary_kscreen_output()
+	var out: Dictionary = _active_output()
 	if out.is_empty():
 		unavailable_row(c, "Resolution & Scaling", "No active output detected")
 		return
-	var name: String = out["name"]
-	var modes: Array = out["modes"]          # [{label, id}], first is current
-	var current_mode: String = out["current"]  # e.g. "1920x1080@165"
+	var name: String = str(out["name"])
+	var modes: Array = out["modes"]
+	var current_id: String = str(out["current_mode_id"])
+
+	if modes.is_empty():
+		unavailable_row(c, "Resolution", name + " reports no switchable modes")
+		return
 
 	var labels: Array = []
 	var selected := 0
 	for i in modes.size():
-		labels.append(modes[i]["label"])
-		if modes[i]["label"] == current_mode:
+		labels.append(str(modes[i]["label"]))
+		if str(modes[i]["id"]) == current_id:
 			selected = i
-	if labels.is_empty():
-		info_row(c, "Resolution", "No modes reported for " + name + ".")
-	else:
-		choice_row(c, "Resolution", "Current: " + current_mode + " on " + name + ".", "R",
-			labels, selected, func(idx: int) -> void:
-				_set_kscreen_mode(name, str(modes[idx]["id"]), str(modes[idx]["label"])))
+	var current_label: String = str(labels[selected]) if not labels.is_empty() else ""
+
+	choice_row(c, "Resolution", "Current: " + current_label + " on " + name + ".", "R",
+		labels, selected, func(idx: int) -> void:
+			_set_kscreen_mode(name, str(modes[idx]["id"]), str(modes[idx]["label"])))
 
 	var scale_opts: Array = ["100%", "125%", "150%", "175%", "200%"]
 	var scale_vals: Array = [1.0, 1.25, 1.5, 1.75, 2.0]
@@ -99,80 +207,13 @@ func _build_resolution_section() -> void:
 			_set_kscreen_scale(name, float(scale_vals[idx]), str(scale_opts[idx])))
 
 
-# Returns {name, modes: [{label, id}], current, scale} for the first enabled output.
-func _primary_kscreen_output() -> Dictionary:
-	var raw := Sh.run_capture("kscreen-doctor -o 2>/dev/null")
-	# Strip ANSI colour codes.
-	var re := RegEx.new()
-	re.compile("\u001b\\[[0-9;]*m")
-	var text := re.sub(raw, "", true)
-
-	var current: Dictionary = {}
-	var outputs: Array = []
-	for line in text.split("\n"):
-		var s := line.strip_edges()
-		if s.begins_with("Output: "):
-			if not current.is_empty():
-				outputs.append(current)
-			var rest := s.substr(8)
-			var parts := rest.split(" ", false)
-			# parts: [id, name]
-			current = {"name": parts[1] if parts.size() > 1 else "", "modes": [],
-				"current": "", "scale": 1.0, "enabled": false}
-		elif not current.is_empty():
-			if s == "enabled":
-				current["enabled"] = true
-			elif s.begins_with("Modes:"):
-				current["modes"] = _parse_kscreen_modes(s)
-			elif s.begins_with("Scale:"):
-				var v := s.get_slice(":", 1).strip_edges()
-				current["scale"] = float(v) if v.is_valid_float() else 1.0
-			elif s.begins_with("Geometry:"):
-				pass
-	if not current.is_empty():
-		outputs.append(current)
-
-	for o in outputs:
-		if o["enabled"] and not o["modes"].is_empty():
-			# Find the active mode (flagged '*' by kscreen-doctor).
-			for m in o["modes"]:
-				if m["current"]:
-					o["current"] = str(m["label"])
-					break
-			if o["current"] == "":
-				o["current"] = str(o["modes"][0]["label"])
-			return o
-	return {}
-
-
-# "Modes: 1:1920x1080@60! 2:1920x1080@165*" -> [{label, id, current}], ...
-# Suffixes: '!' = preferred, '*' = currently active.
-func _parse_kscreen_modes(line: String) -> Array:
-	var modes: Array = []
-	var body := line.substr(line.find(":") + 1)
-	for token in body.split(" ", false):
-		var t := token.strip_edges()
-		var sep := t.find(":")
-		if sep <= 0:
-			continue
-		var id := t.substr(0, sep)
-		var label := t.substr(sep + 1)
-		var current := label.ends_with("*")
-		label = label.trim_suffix("*").trim_suffix("!")
-		if not id.is_valid_int() or not label.contains("x"):
-			continue
-		modes.append({"id": id, "label": label, "current": current})
-	return modes
-
-
 func _set_kscreen_mode(output: String, mode_id: String, label: String) -> void:
-	# kscreen-doctor applies modes atomically; a wrong mode is auto-reverted by
-	# KScreen's own 20s revert timer in most cases, but we only ever offer modes
-	# the display reported, so this is safe. These are one-shot dropdown picks
-	# (not slider spam) and finish fast, so run them to completion and report a
-	# failure instead of leaving "Setting resolution to …" hanging forever.
+	# kscreen-doctor applies modes atomically and KScreen reverts a mode the
+	# display cannot drive, but we only ever offer modes the display reported.
+	# These are one-shot dropdown picks, not slider spam, so run them to
+	# completion and report a failure instead of leaving a toast hanging.
 	var code := Sh.run_wait(
-			"kscreen-doctor output." + Sh.quote(output) + ".mode." + Sh.quote(label)
+			"kscreen-doctor output." + Sh.quote(output) + ".mode." + Sh.quote(mode_id)
 			+ " >/dev/null 2>&1")
 	if code == 0:
 		notify("Resolution set to " + label + ".")
@@ -190,17 +231,7 @@ func _set_kscreen_scale(output: String, scale: float, label: String) -> void:
 		notify("Could not set the scale to " + label + ".")
 
 
-func _primary_resolution() -> String:
-	var out: String = Sh.run_capture("xrandr --query 2>/dev/null")
-	for line in out.split("\n"):
-		if line.contains(" connected primary") or line.contains(" connected"):
-			for token in line.split(" ", false):
-				if token.contains("x") and token.contains("+"):
-					return token.split("+")[0]
-	return UNAVAILABLE
-
-
-# --- brightness ------------------------------------------------------------
+# --- brightness -------------------------------------------------------------
 
 func _init_brightness() -> void:
 	var displays := _brightness_displays()

@@ -47,6 +47,13 @@ func _populate() -> void:
 	# on reporting a freshly installed tool as missing until the app restarts.
 	Sh.clear_tool_cache()
 
+	# Rows are rebuilt from the live system on every refresh (including after an
+	# install), so clear the previous pass first or the sections would double up.
+	_clear_card(_tools_card)
+	_clear_card(_prefix_card)
+	_clear_card(_proton_card)
+	_clear_card(_gfx_card)
+
 	var wine_ver := _wine_version()
 	var tricks_ver := _winetricks_version()
 	var steam := _probe_steam()
@@ -58,6 +65,12 @@ func _populate() -> void:
 	_build_prefix(prefix)
 	_build_proton(steam)
 	_build_graphics(prefix, dxvk)
+
+
+func _clear_card(card_box: VBoxContainer) -> void:
+	for child in card_box.get_children():
+		card_box.remove_child(child)
+		child.queue_free()
 
 
 # --- overview tiles ---------------------------------------------------------
@@ -153,7 +166,12 @@ func _launch_or_notify(tool: String) -> void:
 
 func _install(pkg: String) -> void:
 	notify("Installing " + pkg + "…")
-	Sh.run("pkexec apt-get install -y -- " + Sh.quote(pkg))
+	run_async(Sh.install_command(pkg), func(code: int) -> void:
+		if code == 0:
+			notify(pkg + " installed.")
+			_populate()
+		else:
+			notify("Could not install " + pkg + "."))
 
 
 # --- wine prefixes ----------------------------------------------------------
@@ -200,7 +218,11 @@ func _run_exe(path: String) -> void:
 		notify("Wine is not installed.")
 		return
 	notify("Launching " + path.get_file() + "…")
-	Sh.run("WINEPREFIX=" + Sh.quote(_prefix_path()) + " wine " + Sh.quote(path))
+	var code := Sh.run_wine_exe(path, _prefix_path())
+	if code == 127:
+		notify("Wine is not installed.")
+	elif code != 0:
+		notify("Wine could not start " + path.get_file() + ".")
 
 
 func _open_folder(path: String) -> void:
@@ -319,7 +341,12 @@ func _install_dxvk() -> void:
 		notify("winetricks is not installed.")
 		return
 	notify("Installing DXVK — this can take a few minutes.")
-	Sh.run("WINEPREFIX=" + Sh.quote(prefix) + " winetricks -q dxvk")
+	run_async("WINEPREFIX=" + Sh.quote(prefix) + " winetricks -q dxvk", func(code: int) -> void:
+		if code == 0:
+			notify("DXVK installed.")
+			_populate()
+		else:
+			notify("DXVK installation failed."))
 
 
 # --- probes -----------------------------------------------------------------

@@ -5,6 +5,7 @@ var _tz_popup: PopupPanel = null
 var _tz_filter: LineEdit = null
 var _tz_list: ItemList = null
 var _tz_all: PackedStringArray = PackedStringArray()
+var _tz_row: HBoxContainer = null
 
 
 func build() -> void:
@@ -15,13 +16,13 @@ func build() -> void:
 	info_row(c, "Language", _env("LANG", UNAVAILABLE))
 	info_row(c, "Numeric / Time", _env("LC_ALL", _env("LC_TIME", "Default")))
 	info_row(c, "Keyboard Layout", _keyboard_layout())
-	info_row(c, "Timezone", _timezone())
+	_tz_row = info_row(c, "Timezone", _timezone())
 
 	section("Language")
 	var c2 := card()
 	kcm_row(c2, "Region & Language", "Language, formats and translations.", "L", "kcm_regionandlang")
 	kcm_row(c2, "Spell Checking", "Dictionaries and spell options.", "S", "kcmspellchecking")
-	kcm_row(c2, "Input Method", "Fcitx / IBus configuration.", "I", "kcm_fcitx5")
+	nav_row(c2, "Input Method", "Configure Fcitx 5 or IBus.", "I", _open_input_method)
 	nav_row(c2, "IBus Setup", "Configure IBus input sources.", "B", func() -> void:
 		if Sh.has_tool("ibus-setup"):
 			Sh.launch("ibus-setup")
@@ -35,11 +36,24 @@ func build() -> void:
 		["12-Hour", "Use region defaults", "24-Hour"], _clock_format_index(), _set_clock_format)
 	action_row(c3, "Set Time Automatically", "Sync the clock over the network.", "A", "Sync", func() -> void:
 		if Sh.has_tool("timedatectl"):
-			Sh.run("pkexec timedatectl set-ntp true")
-			notify("Network time enabled.")
+			if Sh.run_wait("pkexec timedatectl set-ntp true") == 0:
+				notify("Network time enabled.")
+			else:
+				notify("Could not enable network time.")
 		else:
 			Sh._notify_missing("timedatectl", "Automatic time sync", notify))
 	kcm_row(c3, "Date & Time", "Time zone and clock format.", "T", "kcm_clock")
+
+
+func _open_input_method() -> void:
+	if Sh.has_tool("fcitx5-configtool"):
+		Sh.launch("fcitx5-configtool")
+	elif Sh.has_tool("ibus-setup"):
+		Sh.launch("ibus-setup")
+	elif Sh.has_tool("fcitx-configtool"):
+		Sh.launch("fcitx-configtool")
+	else:
+		Sh._notify_missing("fcitx5-configtool or ibus-setup", "Input method settings", notify)
 
 
 func _env(key: String, fallback: String) -> String:
@@ -50,16 +64,23 @@ func _env(key: String, fallback: String) -> String:
 func _keyboard_layout() -> String:
 	if Sh.has_tool("localectl"):
 		for line in Sh.run_lines("localectl status 2>/dev/null"):
-			if line.contains("X11 Layout") or line.contains("VC Keymap") or line.contains("Layout"):
-				return line.split(":", true, 1)[1].strip_edges()
+			if not line.contains(":"):
+				continue
+			if line.contains("X11 Layout") or line.contains("VC Keymap"):
+				var value := line.split(":", true, 1)[1].strip_edges()
+				if not value.is_empty():
+					return value
 	return UNAVAILABLE
 
 
 func _timezone() -> String:
 	if Sh.has_tool("timedatectl"):
 		for line in Sh.run_lines("timedatectl 2>/dev/null"):
-			if line.contains("Time zone"):
-				return line.split(":", true, 1)[1].strip_edges().split(" ")[0]
+			if line.contains("Time zone") and line.contains(":"):
+				var value := line.split(":", true, 1)[1].strip_edges()
+				var zone := value.split(" ")[0]
+				if not zone.is_empty():
+					return zone
 	return UNAVAILABLE
 
 
@@ -126,9 +147,15 @@ func _apply_tz_filter(text: String) -> void:
 
 func _on_tz_activated(index: int) -> void:
 	var tz := _tz_list.get_item_text(index)
-	Sh.run("pkexec timedatectl set-timezone " + Sh.quote(tz))
-	notify("Requesting time zone change to " + tz + "…")
 	_tz_popup.hide()
+	notify("Requesting the time zone change…")
+	run_async("pkexec timedatectl set-timezone " + Sh.quote(tz), func(code: int) -> void:
+		if code != 0:
+			notify("Could not change the time zone.")
+			return
+		if _tz_row != null and is_instance_valid(_tz_row):
+			set_info_value(_tz_row, tz)
+		notify("Time zone set to " + tz + "."))
 
 
 # --- 12/24h clock format (Plasma digital clock applet) -----------------------
