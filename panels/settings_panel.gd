@@ -723,9 +723,13 @@ func notify(message: String) -> void:
 		get_tree().root.add_child(_toast_layer)
 
 	var toast := PanelContainer.new()
+	# The pill inverts the text colour so it is readable in both light and dark
+	# themes, and the label uses the inverse of that as its ink.
+	var pill: Color = _text_color()
+	var ink := Color(1.0 - pill.r, 1.0 - pill.g, 1.0 - pill.b, 1.0)
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = _with_alpha(_text_color(), 0.92)
-	sb.set_corner_radius_all(6)
+	sb.bg_color = _with_alpha(pill, 0.95)
+	sb.set_corner_radius_all(8)
 	sb.content_margin_left = 16
 	sb.content_margin_right = 16
 	sb.content_margin_top = 10
@@ -737,7 +741,7 @@ func notify(message: String) -> void:
 
 	var label := Label.new()
 	label.text = message
-	label.add_theme_color_override("font_color", _text_color())
+	label.add_theme_color_override("font_color", ink)
 	toast.add_child(label)
 
 	var tween := create_tween()
