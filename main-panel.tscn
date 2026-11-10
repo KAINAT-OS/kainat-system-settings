@@ -1514,6 +1514,20 @@ toggle_mode = true
 button_group = ExtResource("2_8an0a")
 text = "Startup Apps"
 
+[node name="bluetooth" type="Button" parent="MarginContainer/VBoxContainer/HBoxContainer/ScrollContainer/menu-buttons"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+toggle_mode = true
+button_group = ExtResource("2_8an0a")
+text = "Bluetooth"
+
+[node name="printers" type="Button" parent="MarginContainer/VBoxContainer/HBoxContainer/ScrollContainer/menu-buttons"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+toggle_mode = true
+button_group = ExtResource("2_8an0a")
+text = "Printers"
+
 [node name="router" type="PanelContainer" parent="MarginContainer/VBoxContainer/HBoxContainer"]
 layout_mode = 2
 size_flags_horizontal = 3
