@@ -659,25 +659,32 @@ static func install_arabic_support() -> int:
 # --- hotspot helpers --------------------------------------------------------
 
 static func create_wifi_hotspot(ssid: String, password: String) -> int:
+	return run_wait(create_wifi_hotspot_command(ssid, password))
+
+
+# Command form so the panel can run it through run_async() instead of freezing
+# the window while NetworkManager brings the access point up.
+static func create_wifi_hotspot_command(ssid: String, password: String) -> String:
 	# nmcli refuses to reuse an existing profile name, so drop a stale one first.
-	return run_wait(
-		"nmcli con delete 'Kainat-Hotspot' >/dev/null 2>&1; "
+	return ("nmcli con delete 'Kainat-Hotspot' >/dev/null 2>&1; "
 		+ "nmcli dev wifi hotspot con-name 'Kainat-Hotspot' ssid " + quote(ssid)
-		+ " password " + quote(password)
-	)
+		+ " password " + quote(password))
 
 
 static func stop_wifi_hotspot() -> int:
+	return run_wait(stop_wifi_hotspot_command())
+
+
+static func stop_wifi_hotspot_command() -> String:
 	# `;` rather than `&&`: an already-down profile must still be deleted.
-	return run_wait(
-		"nmcli con down 'Kainat-Hotspot' >/dev/null 2>&1; "
-		+ "nmcli con delete 'Kainat-Hotspot' >/dev/null 2>&1"
-	)
+	return ("nmcli con down 'Kainat-Hotspot' >/dev/null 2>&1; "
+		+ "nmcli con delete 'Kainat-Hotspot' >/dev/null 2>&1")
 
 
 # --- proxy helpers ----------------------------------------------------------
 
-static func set_system_proxy(mode: String, host: String = "", port: String = "") -> void:
+static func set_system_proxy(mode: String, host: String = "", port: String = "",
+		script_url: String = "") -> void:
 	# mode: "manual", "auto", "none"
 	# Plasma apps read kioslaverc, GTK apps read the GNOME proxy schema, so both
 	# are written; otherwise half the desktop would ignore the setting.
@@ -687,6 +694,9 @@ static func set_system_proxy(mode: String, host: String = "", port: String = "")
 	elif mode == "auto":
 		proxy_type = "2"
 	kde_write("kioslaverc", "Proxy Settings", "ProxyType", proxy_type)
+
+	if mode == "auto" and not script_url.is_empty():
+		kde_write("kioslaverc", "Proxy Settings", "Proxy Config Script", script_url)
 
 	var p := port if not port.is_empty() else "8080"
 	if mode == "manual" and not host.is_empty():
@@ -698,6 +708,8 @@ static func set_system_proxy(mode: String, host: String = "", port: String = "")
 		kde_write("kioslaverc", "Proxy Settings", "socksProxy", "socks://" + host + " " + p)
 
 	run("gsettings set org.gnome.system.proxy mode " + quote(mode))
+	if mode == "auto" and not script_url.is_empty():
+		run("gsettings set org.gnome.system.proxy autoconfig-url " + quote(script_url))
 	if mode == "manual" and not host.is_empty():
 		run("gsettings set org.gnome.system.proxy use-same-proxy true")
 		for scheme in ["http", "https", "socks"]:
@@ -734,7 +746,10 @@ static func get_system_proxy() -> Dictionary:
 	if host.is_empty():
 		host = run_capture("gsettings get org.gnome.system.proxy.http host").strip_edges().trim_prefix("'").trim_suffix("'")
 		port = run_capture("gsettings get org.gnome.system.proxy.http port").strip_edges()
-	return {"mode": mode, "host": host, "port": port}
+	var script_url := kde_read("kioslaverc", "Proxy Settings", "Proxy Config Script", "")
+	if script_url.is_empty() and mode == "auto":
+		script_url = run_capture("gsettings get org.gnome.system.proxy autoconfig-url").strip_edges().trim_prefix("'").trim_suffix("'")
+	return {"mode": mode, "host": host, "port": port, "script": script_url}
 
 
 # --- repo helpers -----------------------------------------------------------
