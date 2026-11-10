@@ -3,6 +3,35 @@ extends VBoxContainer
 const Sh := preload("res://panels/kainat_shell.gd")
 const FAV_GROUP := "favorites_ui"
 
+# Sidebar layout. Buttons are regrouped under these headings in this order;
+# any button not listed here lands in a trailing "More" section so a new panel
+# never disappears from the sidebar.
+const SECTIONS: Array = [
+	{
+		"title": "Appearance",
+		"panels": ["personalization", "displays", "accessibility", "input_methods"],
+	},
+	{
+		"title": "Sound & Devices",
+		"panels": ["io", "bluetooth", "printers", "hardware"],
+	},
+	{
+		"title": "Network",
+		"panels": ["nac", "vpn_manager", "ssh_manager", "sharing", "firewall"],
+	},
+	{
+		"title": "Applications",
+		"panels": ["applications", "universal_installer", "windows_compat", "startup"],
+	},
+	{
+		"title": "System",
+		"panels": [
+			"update", "driver-manager", "services", "disk_manager", "backup",
+			"boot", "ps", "lal", "las", "users", "about",
+		],
+	},
+]
+
 # Configuration
 @export var startup_tab: Button
 
@@ -41,6 +70,8 @@ func _ready() -> void:
 
 	add_theme_constant_override("separation", 4)
 
+	_build_sections()
+
 	# Deterministic Startup State
 	if startup_tab and startup_tab.get_parent() == self:
 		# Force signal emission if setting property directly doesn't trigger logic
@@ -54,6 +85,69 @@ func _ready() -> void:
 	# Pinned rows live above the section list (built after discovery so these
 	# buttons never join the section ButtonGroup).
 	refresh_favorites()
+
+
+# Reorder the flat button list into titled sections and insert a heading
+# before each group. Headings are plain Labels so they never join the
+# ButtonGroup or receive keyboard focus.
+func _build_sections() -> void:
+	var by_name: Dictionary = {}
+	for b in _buttons:
+		by_name[b.name] = b
+
+	var order: Array[Node] = []
+	for child in get_children():
+		if child.name == "Brand":
+			order.append(child)
+			break
+
+	var placed: Dictionary = {}
+	for section in SECTIONS:
+		var panels: Array = section["panels"]
+		var members: Array[Button] = []
+		for p in panels:
+			var key := str(p)
+			if by_name.has(key) and not placed.has(key):
+				members.append(by_name[key])
+				placed[key] = true
+		if members.is_empty():
+			continue
+		var head := _section_header(str(section["title"]))
+		add_child(head)
+		order.append(head)
+		for b in members:
+			order.append(b)
+
+	var leftovers: Array[Button] = []
+	for b in _buttons:
+		if not placed.has(b.name):
+			leftovers.append(b)
+	if not leftovers.is_empty():
+		var more := _section_header("More")
+		add_child(more)
+		order.append(more)
+		for b in leftovers:
+			order.append(b)
+
+	for i in order.size():
+		move_child(order[i], i)
+
+
+func _section_header(title: String) -> MarginContainer:
+	var label := Label.new()
+	label.text = title
+	label.add_theme_font_size_override("font_size", 12)
+	label.add_theme_color_override("font_color", Color(1, 1, 1, 0.45))
+	label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var wrap := MarginContainer.new()
+	wrap.name = "Section_%s" % title.replace(" ", "").replace("&", "and")
+	wrap.add_theme_constant_override("margin_left", 16)
+	wrap.add_theme_constant_override("margin_top", 14)
+	wrap.add_theme_constant_override("margin_bottom", 2)
+	wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wrap.add_child(label)
+	return wrap
 
 
 func _on_menu_btn_toggled(toggled_on: bool, button: Button) -> void:
