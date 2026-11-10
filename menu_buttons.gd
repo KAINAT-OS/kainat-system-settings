@@ -27,7 +27,7 @@ const SECTIONS: Array = [
 		"title": "System",
 		"panels": [
 			"update", "driver-manager", "services", "disk_manager", "backup",
-			"boot", "ps", "lal", "las", "users", "about",
+			"boot", "troubleshooting", "ps", "lal", "las", "users", "about",
 		],
 	},
 ]
