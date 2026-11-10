@@ -1305,7 +1305,7 @@ script = ExtResource("6_searchbar")
 
 [node name="SearchBox" type="LineEdit" parent="MarginContainer/VBoxContainer/SearchBar"]
 layout_mode = 2
-placeholder_text = "Search settings…"
+placeholder_text = "Search settings…  (Ctrl+F)"
 clear_button_enabled = true
 
 [node name="Popup" type="PanelContainer" parent="MarginContainer/VBoxContainer/SearchBar"]

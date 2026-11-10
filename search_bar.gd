@@ -203,6 +203,14 @@ func _fit_popup_to_content() -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# Ctrl+F jumps to the search box from anywhere in the window, including
+	# while a panel scroll is focused.
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_F and event.ctrl_pressed:
+			_search_box.grab_focus()
+			_search_box.select_all()
+			get_viewport().set_input_as_handled()
+			return
 	if not _popup.visible:
 		return
 	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
