@@ -241,7 +241,7 @@ func _run_diagnostics() -> void:
 func _reset_settings() -> void:
 	var dialog := ConfirmationDialog.new()
 	dialog.title = "Reset System Settings?"
-	dialog.text = "This will delete your user configuration files:\n• ~/.config/*\n• ~/.local/share/config/*\n\nYour personal files (Documents, Downloads, Pictures, etc.) will NOT be touched.\n\nYou will need to log out and back in for changes to take full effect."
+	dialog.text = "This will reset your user configuration files:\n• ~/.config/*\n• ~/.local/share/config/*\n\nNothing is deleted. The old files are moved to a timestamped backup folder in your home directory, so you can restore them if needed.\n\nYour personal files (Documents, Downloads, Pictures, etc.) will NOT be touched.\n\nYou will need to log out and back in for changes to take full effect."
 	dialog.ok_text = "Reset Settings"
 	dialog.add_cancel_button("Cancel")
 	
@@ -254,36 +254,78 @@ func _on_reset_confirmed(dialog: ConfirmationDialog) -> void:
 	dialog.queue_free()
 	notify("Resetting settings... Please wait.")
 	var code := Sh.reset_user_settings()
-	if code == 0:
+	var backup := Sh.last_reset_backup()
+	if code == 0 and backup.is_empty():
 		notify("Settings reset complete. Please log out and back in.")
-	else:
-		notify("Reset completed with some errors. Check terminal.")
+		return
+	if backup.is_empty():
+		notify("Reset failed. Your settings were left unchanged.")
+		return
+	var done := AcceptDialog.new()
+	done.title = "Settings Reset"
+	done.text = "Your settings were reset.\n\nA backup of the old configuration is here:\n" + backup + "\n\nLog out and back in for the changes to take full effect."
+	done.ok_text = "Open Backup Folder"
+	done.add_cancel_button("Close")
+	add_child(done)
+	done.popup_centered()
+	done.confirmed.connect(_on_reset_backup_confirmed.bind(done, backup))
+
+
+func _on_reset_backup_confirmed(dialog: AcceptDialog, backup: String) -> void:
+	dialog.queue_free()
+	Sh.run("xdg-open " + Sh.quote(backup))
 
 
 func _collect_logs() -> void:
 	notify("Collecting system logs...")
-	
-	var log_dir := Sh.home() + "/kainat-logs-" + str(Time.get_unix_time_from_system())
+
+	var log_dir := Sh.home() + "/kainat-logs-" + str(int(Time.get_unix_time_from_system()))
 	_last_log_dir = log_dir
-	Sh.run("mkdir -p " + Sh.quote(log_dir))
-	
-	Sh.run("journalctl --no-pager > " + Sh.quote(log_dir + "/journalctl.log") + " 2>&1")
-	Sh.run("dmesg > " + Sh.quote(log_dir + "/dmesg.log") + " 2>&1")
-	Sh.run("lspci -nn > " + Sh.quote(log_dir + "/lspci.log") + " 2>&1")
-	Sh.run("lsusb > " + Sh.quote(log_dir + "/lsusb.log") + " 2>&1")
-	Sh.run("df -h > " + Sh.quote(log_dir + "/disk.log") + " 2>&1")
-	Sh.run("free -h > " + Sh.quote(log_dir + "/memory.log") + " 2>&1")
-	Sh.run("cat /etc/os-release > " + Sh.quote(log_dir + "/os-release.log") + " 2>&1")
-	Sh.run("uname -a > " + Sh.quote(log_dir + "/kernel.log") + " 2>&1")
-	
-	notify("Logs saved to: " + log_dir)
-	
+
+	# One background shell writes every report and drops a marker file when the
+	# last one finishes. The UI stays responsive, and the folder is never opened
+	# while the files are still half empty.
+	var steps := PackedStringArray()
+	steps.append("mkdir -p " + Sh.quote(log_dir) + " && cd " + Sh.quote(log_dir) + " || exit 1")
+	steps.append("journalctl --no-pager -n 20000 > journalctl.log 2>&1")
+	steps.append("dmesg > dmesg.log 2>&1")
+	steps.append("lspci -nn > lspci.log 2>&1")
+	steps.append("lsusb > lsusb.log 2>&1")
+	steps.append("df -h > disk.log 2>&1")
+	steps.append("free -h > memory.log 2>&1")
+	steps.append("cat /etc/os-release > os-release.log 2>&1")
+	steps.append("uname -a > kernel.log 2>&1")
+	steps.append("touch .done")
+	Sh.run(" ; ".join(steps))
+
+	if _log_poll_timer == null:
+		_log_poll_timer = Timer.new()
+		_log_poll_timer.wait_time = 0.25
+		_log_poll_timer.timeout.connect(_poll_logs)
+		add_child(_log_poll_timer)
+	_log_poll_elapsed = 0.0
+	_log_poll_timer.start()
+
+
+func _poll_logs() -> void:
+	_log_poll_elapsed += 0.25
+	var finished := FileAccess.file_exists(_last_log_dir + "/.done")
+	# Never spin forever: a blocked journalctl should not swallow the dialog.
+	if not finished and _log_poll_elapsed < 30.0:
+		return
+	_log_poll_timer.stop()
+	_show_logs_dialog()
+
+
+func _show_logs_dialog() -> void:
+	notify("Logs saved to: " + _last_log_dir)
+
 	var dialog := AcceptDialog.new()
 	dialog.title = "Logs Collected"
-	dialog.text = "System logs saved to:\n" + log_dir + "\n\nYou can attach these when reporting issues."
+	dialog.text = "System logs saved to:\n" + _last_log_dir + "\n\nYou can attach these when reporting issues."
 	dialog.ok_text = "Open Folder"
 	dialog.add_cancel_button("Close")
-	
+
 	add_child(dialog)
 	dialog.popup_centered()
 	dialog.confirmed.connect(_on_logs_confirmed.bind(dialog))
@@ -295,3 +337,5 @@ func _on_logs_confirmed(dialog: AcceptDialog) -> void:
 
 
 var _last_log_dir: String = ""
+var _log_poll_timer: Timer = null
+var _log_poll_elapsed: float = 0.0

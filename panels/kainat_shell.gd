@@ -441,18 +441,29 @@ static func get_disk_usage(mountpoint: String) -> Dictionary:
 	if mountpoint.is_empty():
 		return result
 	var output: String = run_capture("df -h " + quote(mountpoint) + " | tail -1")
-	var parts := output.strip_edges().split(" ", true)
+	# df pads columns with runs of spaces, so empty fields must be collapsed.
+	var parts := output.strip_edges().split(" ", false)
 	if parts.size() >= 5:
 		result["total"] = parts[1]
 		result["used"] = parts[2]
 		result["available"] = parts[3]
-		result["percent"] = parts[4].trim_suffix("%")
+		result["percent"] = int(parts[4].trim_suffix("%"))
 	return result
+
+
+# Unmount a whole device and every partition below it. udisksctl refuses to
+# unmount a disk that still has mounted partitions, so walk the tree first.
+static func unmount_device(device: String) -> void:
+	run_capture("udisksctl unmount -b " + quote(device) + " 2>/dev/null")
+	for name in run_lines("lsblk -ln -o NAME " + quote(device) + " 2>/dev/null"):
+		if name != device.get_file():
+			run_capture("udisksctl unmount -b " + quote("/dev/" + name) + " 2>/dev/null")
 
 
 static func eject_drive(device: String) -> int:
 	# device is like /dev/sdb
-	return run_wait("udisksctl unmount -b " + quote(device) + " && udisksctl power-off -b " + quote(device))
+	unmount_device(device)
+	return run_wait("udisksctl power-off -b " + quote(device))
 
 
 static func format_drive(device: String, fs: String) -> int:
@@ -575,7 +586,10 @@ static func toggle_apt_source(file_path: String, enabled: bool) -> int:
 			else:
 				new_lines.append(l)
 		content = "\n".join(new_lines)
-	return run_wait("pkexec sh -c 'printf %s " + quote(content) + " > " + quote(file_path) + "'")
+	# Build the whole inner command first, then quote it once: nesting
+	# quote() inside a hand-written '...' wrapper breaks as soon as the
+	# content itself contains a single quote.
+	return run_wait("pkexec sh -c " + quote("printf %s " + quote(content) + " > " + quote(file_path)))
 
 
 # --- universal installer helpers --------------------------------------------
@@ -598,18 +612,50 @@ static func run_wine_exe(path: String) -> int:
 
 # --- system reset helpers ---------------------------------------------------
 
+static var _last_reset_backup: String = ""
+
+
+# Where the most recent reset parked the old configuration, or "" if nothing
+# was moved. Callers surface this so a reset can always be undone by hand.
+static func last_reset_backup() -> String:
+	return _last_reset_backup
+
+
 static func reset_user_settings() -> int:
-	# Reset config but preserve data
-	var dirs := [
+	# Reset configuration without destroying anything: every entry is moved into
+	# a timestamped backup folder instead of being deleted. A user who resets by
+	# accident (or misses a browser profile / keyring) can copy the files back.
+	var stamp := str(int(Time.get_unix_time_from_system()))
+	var backup: String = home() + "/kainat-settings-backup-" + stamp
+	var dirs: Array[String] = [
 		home() + "/.config",
 		home() + "/.local/share/config"
 	]
+	if run_wait("mkdir -p " + quote(backup)) != 0:
+		_last_reset_backup = ""
+		return -1
+
+	var moved_any := false
 	var exit_code := 0
 	for dir in dirs:
-		if dir_exists(dir):
-			exit_code = run_wait("rm -rf " + quote(dir) + "/*")
-			if exit_code != 0:
-				break
+		if not dir_exists(dir):
+			continue
+		var target: String = backup + dir.trim_prefix(home())
+		if run_wait("mkdir -p " + quote(target)) != 0:
+			exit_code = -1
+			continue
+		# -exec ... + batches many entries per mv call, so this stays quick even
+		# with thousands of files. Dotfiles are included by default.
+		var code := run_wait(
+			"find " + quote(dir) + " -mindepth 1 -maxdepth 1"
+			+ " -exec mv -t " + quote(target) + " -- {} +"
+		)
+		if code != 0:
+			exit_code = code
+		else:
+			moved_any = true
+
+	_last_reset_backup = backup if moved_any else ""
 	return exit_code
 
 
@@ -670,7 +716,8 @@ static func get_cpu_temp() -> int:
 
 static func get_ram_usage() -> Dictionary:
 	var output: String = run_capture("free -m | grep Mem")
-	var parts := output.strip_edges().split(" ", true)
+	# "Mem:" is followed by runs of spaces; collapse them or every field is "".
+	var parts := output.strip_edges().split(" ", false)
 	var result: Dictionary = {"total": 0, "used": 0, "free": 0, "percent": 0.0}
 	if parts.size() >= 3:
 		result["total"] = int(parts[1])

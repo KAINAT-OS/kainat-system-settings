@@ -71,7 +71,9 @@ func _populate_cpu() -> void:
 		choice_row(c2, "CPU Governor", "Scaling strategy for the processor.", "C", governors,
 			governors.find(current_gov), func(index: int) -> void:
 				var mode: String = str(governors[index])
-				Sh.run("pkexec sh -c 'echo " + Sh.quote(mode) + " | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor'")
+				# The governor name is written inside a pkexec shell command, so
+				# quote the whole inner command rather than nesting quotes.
+				Sh.run("pkexec sh -c " + Sh.quote("echo " + mode + " | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor"))
 				notify("CPU governor: " + mode))
 	else:
 		unavailable_row(c2, "CPU Governor", "The kernel does not expose cpufreq")

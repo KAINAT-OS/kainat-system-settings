@@ -194,13 +194,14 @@ func _on_remove() -> void:
 	var item_data: Dictionary = _vpn_list.get_item_metadata(idx_val)
 	var name := _vpn_list.get_item_text(idx_val)
 
-	var dialog := AcceptDialog.new()
+	var dialog := ConfirmationDialog.new()
 	dialog.title = "Remove VPN?"
 	dialog.text = "Remove " + name + " from the list?\n\nConfig files will be deleted."
 	dialog.ok_text = "Remove"
+	dialog.add_cancel_button("Cancel")
 	dialog.confirmed.connect(func() -> void:
 		if str(item_data.get("type", "")) == "openvpn":
-			Sh.run("rm " + Sh.quote(_config_dir + str(item_data.get("file", ""))))
+			Sh.run_wait("rm " + Sh.quote(_config_dir + str(item_data.get("file", ""))))
 		elif str(item_data.get("type", "")) == "wireguard" or str(item_data.get("type", "")) == "nm":
 			Sh.run_wait("nmcli con delete " + Sh.quote(str(item_data.get("name", ""))))
 		notify("Removed " + name)

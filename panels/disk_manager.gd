@@ -2,49 +2,60 @@ extends SettingsPanel
 # Disk Manager: view disks, format, eject, and check health.
 # Uses udisks2 for safe operations and lsblk/df for info.
 
-var _disk_cards: Array = []
+var _disk_cards: Array[Node] = []
 
 
 func build() -> void:
 	page_header("Disk Manager", "Manage storage devices, format drives, and monitor health.")
-	
-	var c := card()
-	info_row(c, "Scanning...", "Detecting storage devices")
-	
+	_build_placeholder()
 	defer(_populate)
 
 
+func _build_placeholder() -> void:
+	var c := card()
+	_disk_cards.append(c.get_parent())
+	info_row(c, "Scanning...", "Detecting storage devices")
+
+
+func _clear_cards() -> void:
+	for node in _disk_cards:
+		if is_instance_valid(node):
+			if node.get_parent() == content:
+				content.remove_child(node)
+			node.queue_free()
+	_disk_cards.clear()
+
+
 func _populate() -> void:
-	# Clear the placeholder
-	for child in content.get_children():
-		if child is VBoxContainer and child.get_child_count() > 0:
-			var first = child.get_child(0)
-			if first is Label and "Scanning" in first.text:
-				child.queue_free()
-				break
-	
+	_clear_cards()
+
 	var devices := Sh.list_block_devices()
 	if devices.is_empty():
-		unavailable_row(content, "Storage devices", "Could not read block devices.")
+		var c := card()
+		_disk_cards.append(c.get_parent())
+		unavailable_row(c, "Storage devices", "Could not read block devices.")
 		return
-	
+
 	for dev in devices:
 		_build_disk_card(dev)
 
 
 func _build_disk_card(dev: Dictionary) -> void:
-	var name: String = str(dev.get("name", "unknown"))
-	var mountpoint: String = str(dev.get("mountpoint", ""))
-	var size: String = str(dev.get("size", "?"))
-	var dtype: String = str(dev.get("type", ""))
-	var children: Array = dev.get("children", [])
-	
-	# Skip loop devices and ram disks
-	if name.begins_with("loop") or name.begins_with("ram"):
+	var name: String = _field(dev, "name", "unknown")
+	var mountpoint: String = _field(dev, "mountpoint", "")
+	var size: String = _field(dev, "size", "?")
+	var dtype: String = _field(dev, "type", "")
+	var children: Array = dev.get("children") if dev.get("children") is Array else []
+
+	# Skip loop devices, RAM disks and optical drives with no media.
+	if name.begins_with("loop") or name.begins_with("ram") or name.begins_with("zram"):
 		return
-	
+	if dtype == "rom":
+		return
+
 	var c := card()
-	
+	_disk_cards.append(c.get_parent())
+
 	# Header with icon
 	var header := HBoxContainer.new()
 	c.add_child(header)
@@ -72,8 +83,8 @@ func _build_disk_card(dev: Dictionary) -> void:
 		
 		# Usage bar
 		var usage := Sh.get_disk_usage(mountpoint)
-		if usage["percent"] is int:
-			var percent: int = usage["percent"]
+		var percent: int = int(usage.get("percent", 0))
+		if percent > 0:
 			var bar := ProgressBar.new()
 			bar.min_value = 0
 			bar.max_value = 100
@@ -158,7 +169,12 @@ func _on_format(device: String, size: String) -> void:
 	dialog.confirmed.connect(func() -> void:
 		var fs_map: Array[String] = ["vfat", "ntfs", "ext4"]
 		var fs: String = fs_map[fs_box.selected]
+		if fs == "ntfs" and not Sh.has_tool("mkfs.ntfs"):
+			notify("NTFS support is missing. Install the ntfs-3g package first.")
+			return
 		notify("Formatting " + device + " as " + fs + "...")
+		# mkfs refuses to touch a mounted device; unmount it and any children.
+		Sh.unmount_device(device)
 		var code := Sh.format_drive(device, fs)
 		if code == 0:
 			notify(device + " formatted successfully as " + fs)
@@ -172,7 +188,9 @@ func _on_format(device: String, size: String) -> void:
 
 
 func _on_health(device: String) -> void:
-	# Simple SMART check via smartctl
+	if not Sh.has_tool("smartctl"):
+		notify("SMART tools are not installed. Install smartmontools first.")
+		return
 	notify("Checking SMART data for " + device + "...")
 	var output := Sh.run_capture("pkexec smartctl -H " + Sh.quote(device) + " 2>&1")
 	
@@ -183,3 +201,11 @@ func _on_health(device: String) -> void:
 	get_tree().root.add_child(result_dialog)
 	result_dialog.popup_centered()
 	result_dialog.confirmed.connect(result_dialog.queue_free)
+
+
+# lsblk's JSON reports absent values as null; str(null) would print "null".
+func _field(dev: Dictionary, key: String, fallback: String) -> String:
+	var value: Variant = dev.get(key)
+	if value == null:
+		return fallback
+	return str(value)

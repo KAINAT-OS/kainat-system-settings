@@ -236,12 +236,13 @@ func _on_remove_key() -> void:
 	var name: String = str(item_data.get("file", ""))
 	var key_path: String = str(item_data.get("path", ""))
 
-	var dialog := AcceptDialog.new()
+	var dialog := ConfirmationDialog.new()
 	dialog.title = "Remove Key?"
 	dialog.text = "Permanently delete " + name + " and " + name + ".pub?\n\nThis cannot be undone."
 	dialog.ok_text = "Delete"
+	dialog.add_cancel_button("Cancel")
 	dialog.confirmed.connect(func() -> void:
-		Sh.run("rm " + Sh.quote(key_path) + " " + Sh.quote(key_path + ".pub"))
+		Sh.run_wait("rm " + Sh.quote(key_path) + " " + Sh.quote(key_path + ".pub"))
 		notify("Deleted " + name)
 		_refresh_keys())
 	get_tree().root.add_child(dialog)

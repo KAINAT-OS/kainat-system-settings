@@ -2,7 +2,8 @@ extends SettingsPanel
 # Driver Manager: Smart driver detection + installation, plus KCM fallbacks.
 # Auto-detects NVIDIA, AMD, Intel GPUs and Wi-Fi, offers one-click install.
 
-var _driver_cards: Array = []
+var _driver_cards: Array[Node] = []
+var _scan_card: Node = null
 
 
 func build() -> void:
@@ -11,6 +12,7 @@ func build() -> void:
 	# Smart Driver Installer Section
 	section("Smart Driver Installer")
 	var c := card()
+	_scan_card = c.get_parent()
 	info_row(c, "Scanning...", "Detecting hardware and checking for missing drivers")
 	
 	defer(_populate_drivers)
@@ -42,14 +44,24 @@ func build() -> void:
 			Sh._notify_missing("fwupdmgr", "Firmware update", notify))
 
 
+func _driver_card() -> VBoxContainer:
+	var box := card()
+	_driver_cards.append(box.get_parent())
+	return box
+
+
 func _populate_drivers() -> void:
-	# Clear scanning message
-	for child in content.get_children():
-		if child is VBoxContainer:
-			for grandchild in child.get_children():
-				if grandchild is Label and "Scanning" in grandchild.text:
-					grandchild.queue_free()
-					break
+	# Drop the placeholder and anything a previous scan produced, so repeated
+	# scans replace their results instead of stacking duplicates.
+	if is_instance_valid(_scan_card):
+		content.remove_child(_scan_card)
+		_scan_card.queue_free()
+	_scan_card = null
+	for old in _driver_cards:
+		if is_instance_valid(old):
+			content.remove_child(old)
+			old.queue_free()
+	_driver_cards.clear()
 	
 	var drivers_found := false
 	
@@ -59,9 +71,8 @@ func _populate_drivers() -> void:
 		var nvidia_pkg := _get_recommended_nvidia_driver()
 		var installed := Sh.is_package_installed(nvidia_pkg)
 		
-		var c := card()
+		var c := _driver_card()
 		var status := "Installed" if installed else "Not Installed (Recommended)"
-		var color := Color(0.3, 0.8, 0.3) if installed else Color(1.0, 0.6, 0.2)
 		
 		info_row(c, "NVIDIA GPU Detected", "Recommended driver: " + nvidia_pkg + " — " + status)
 		
@@ -86,7 +97,7 @@ func _populate_drivers() -> void:
 	var wifi_info := _detect_wifi()
 	if not wifi_info["driver"].is_empty():
 		drivers_found = true
-		var c := card()
+		var c := _driver_card()
 		info_row(c, "Wi-Fi Adapter: " + wifi_info["device"], "Driver: " + wifi_info["driver"] + " — " + wifi_info["status"])
 		
 		if wifi_info["status"] == "Missing Firmware":
@@ -103,7 +114,7 @@ func _populate_drivers() -> void:
 	var amd_info := _detect_amd_gpu()
 	if not amd_info["missing"].is_empty():
 		drivers_found = true
-		var c := card()
+		var c := _driver_card()
 		info_row(c, "AMD GPU Firmware", "Missing: " + amd_info["missing"])
 		action_row(c, "Install AMD Firmware", "Install linux-firmware for full AMD GPU support.", "A", "Install", func():
 			notify("Installing linux-firmware...")

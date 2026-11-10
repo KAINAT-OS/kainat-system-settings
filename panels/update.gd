@@ -99,7 +99,7 @@ func _on_add_repo() -> void:
 		# Create a new .list file
 		var name := "custom-" + str(int(Time.get_unix_time_from_system()))
 		var path := "/etc/apt/sources.list.d/" + name + ".list"
-		var code := Sh.run_wait("pkexec sh -c 'printf %s " + Sh.quote(line + "\n") + " > " + Sh.quote(path) + "'")
+		var code := Sh.run_wait("pkexec sh -c " + Sh.quote("printf %s " + Sh.quote(line + "\n") + " > " + Sh.quote(path)))
 
 		if code == 0:
 			notify("Repository added. Running apt update...")
