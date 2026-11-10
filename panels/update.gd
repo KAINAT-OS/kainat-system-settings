@@ -17,13 +17,17 @@ func build() -> void:
 	c = card()
 	action_row(c, "Check for Updates", "Refresh the package lists.", "C", "Run", func() -> void:
 		notify("Refreshing package lists…")
-		Sh.run("pkexec apt-get update"))
+		run_async("pkexec apt-get update", func(code: int) -> void:
+			notify("Package lists updated." if code == 0 else "Could not refresh the package lists.")))
 	action_row(c, "Upgrade All Packages", "Install all available updates.", "U", "Upgrade", func() -> void:
-		notify("Upgrading packages…")
-		Sh.run("pkexec apt-get -y upgrade"))
+		notify("Upgrading packages… This can take a while.")
+		run_async("pkexec apt-get -y upgrade", func(code: int) -> void:
+			notify("Upgrade finished." if code == 0 else "Upgrade failed. Check your network connection.")
+			_refresh_sources()))
 	action_row(c, "Remove Unused Packages", "Clean up dependencies and cache.", "R", "Clean", func() -> void:
 		notify("Cleaning up…")
-		Sh.run("pkexec apt-get -y autoremove && pkexec apt-get -y autoclean"))
+		run_async("pkexec sh -c 'apt-get -y autoremove; apt-get -y autoclean'", func(code: int) -> void:
+			notify("Cleanup finished." if code == 0 else "Cleanup failed.")))
 	
 	# Built-in Repository Manager
 	section("Software Sources (Repositories)")

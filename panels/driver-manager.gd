@@ -79,18 +79,16 @@ func _populate_drivers() -> void:
 		if not installed:
 			action_row(c, "Install NVIDIA Driver", "Install " + nvidia_pkg + " for best performance.", "I", "Install", func():
 				notify("Installing " + nvidia_pkg + "... This may take a few minutes.")
-				var code := Sh.install_package(nvidia_pkg)
-				if code == 0:
-					notify("NVIDIA driver installed. Reboot required.")
-				else:
-					notify("Installation failed. Check internet connection.")
+				run_async(Sh.install_command(nvidia_pkg), func(code: int) -> void:
+					notify("NVIDIA driver installed. Reboot required." if code == 0
+						else "Installation failed. Check your internet connection."))
 			)
 		else:
 			action_row(c, "Reinstall Driver", "Reinstall the NVIDIA driver.", "R", "Reinstall", func():
 				notify("Reinstalling " + nvidia_pkg + "...")
-				var code := Sh.install_package(nvidia_pkg)
-				if code == 0:
-					notify("Reinstalled. Reboot required.")
+				run_async(Sh.install_command(nvidia_pkg), func(code: int) -> void:
+					notify("Reinstalled. Reboot required." if code == 0
+						else "Reinstall failed. Check your internet connection."))
 			)
 	
 	# Wi-Fi Detection (common chips)
@@ -102,12 +100,10 @@ func _populate_drivers() -> void:
 		
 		if wifi_info["status"] == "Missing Firmware":
 			action_row(c, "Install Wi-Fi Firmware", "Install " + wifi_info["package"] + " for " + wifi_info["device"], "W", "Install", func():
-				notify("Installing " + wifi_info["package"] + "...")
-				var code := Sh.install_package(wifi_info["package"])
-				if code == 0:
-					notify("Firmware installed. Reboot may be required.")
-				else:
-					notify("Installation failed.")
+				notify("Installing " + str(wifi_info["package"]) + "...")
+				run_async(Sh.install_command(str(wifi_info["package"])), func(code: int) -> void:
+					notify("Firmware installed. Reboot may be required." if code == 0
+						else "Installation failed. Check your internet connection."))
 			)
 	
 	# AMD GPU (open source usually works, but check for firmware)
@@ -118,9 +114,9 @@ func _populate_drivers() -> void:
 		info_row(c, "AMD GPU Firmware", "Missing: " + amd_info["missing"])
 		action_row(c, "Install AMD Firmware", "Install linux-firmware for full AMD GPU support.", "A", "Install", func():
 			notify("Installing linux-firmware...")
-			var code := Sh.install_package("linux-firmware")
-			if code == 0:
-				notify("Firmware installed. Reboot required.")
+			run_async(Sh.install_command("linux-firmware"), func(code: int) -> void:
+				notify("Firmware installed. Reboot required." if code == 0
+					else "Installation failed. Check your internet connection."))
 		)
 	
 	if not drivers_found:

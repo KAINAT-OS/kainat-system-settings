@@ -63,7 +63,7 @@ func _populate() -> void:
 	# CPU Temp
 	var temp_label := Label.new()
 	temp_label.name = "live_temp"
-	temp_label.text = "CPU Temp: " + _temp_text(shown_c)
+	temp_label.text = "Temperature: " + _temp_summary(cpu_c, hot_c)
 	c3.add_child(temp_label)
 	live_labels["temp"] = temp_label
 	
@@ -104,7 +104,7 @@ func _populate() -> void:
 	section("System Monitor")
 	var c4 := card()
 	kcm_row(c4, "Resource Monitor", "Open the live process and resource monitor.", "R", "kcm_memory")
-	nav_row(c3, "System Monitor", "Processes, CPU, memory and disk usage.", "S", func() -> void:
+	nav_row(c4, "System Monitor", "Processes, CPU, memory and disk usage.", "S", func() -> void:
 		if Sh.has_tool("plasma-systemmonitor"):
 			Sh.launch("plasma-systemmonitor")
 		else:
@@ -120,10 +120,9 @@ func _update_live_stats(labels: Dictionary) -> void:
 	var temps: Array = _temperature_readings()
 	var cpu_c: float = _cpu_celsius(temps)
 	var hot_c: float = _hottest_celsius(temps)
-	var shown_c: float = cpu_c if cpu_c > UNKNOWN_TEMP else hot_c
 	
 	if labels.has("temp") and is_instance_valid(labels["temp"]):
-		labels["temp"].text = "CPU Temp: " + _temp_text(shown_c) + " (Hottest: " + _temp_text(hot_c) + ")"
+		labels["temp"].text = "Temperature: " + _temp_summary(cpu_c, hot_c)
 	
 	var ram := Sh.get_ram_usage()
 	if ram["total"] > 0 and labels.has("ram") and is_instance_valid(labels["ram"]):
@@ -161,7 +160,9 @@ func _run_table(command: String) -> String:
 func _cpu_model() -> String:
 	for line in Sh.read_lines("/proc/cpuinfo"):
 		if line.begins_with("model name"):
-			return line.split(":", true, 1)[1].strip_edges()
+			var parts: PackedStringArray = line.split(":", true, 1)
+			if parts.size() > 1:
+				return parts[1].strip_edges()
 	return "Unknown processor"
 
 
@@ -203,7 +204,9 @@ func _gpu() -> String:
 func _disk_summary() -> String:
 	var lines: PackedStringArray = Sh.run_lines("df -h --output=size,avail / 2>/dev/null")
 	if lines.size() > 1:
-		return lines[1]
+		var cols: PackedStringArray = lines[1].split(" ", false)
+		if cols.size() >= 2:
+			return cols[1] + " free of " + cols[0]
 	return UNAVAILABLE
 
 

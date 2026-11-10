@@ -60,20 +60,24 @@ func _build_static() -> void:
 	
 	_proxy_mode.item_selected.connect(_on_proxy_mode_changed)
 	
-	var proxy_row := HBoxContainer.new()
-	var mode_label := Label.new()
-	mode_label.text = "Mode:"
-	proxy_row.add_child(mode_label)
-	proxy_row.add_child(_proxy_mode)
-	var host_label := Label.new()
-	host_label.text = "Host:"
-	proxy_row.add_child(host_label)
-	proxy_row.add_child(_proxy_host)
-	var port_label := Label.new()
-	port_label.text = "Port:"
-	proxy_row.add_child(port_label)
-	proxy_row.add_child(_proxy_port)
-	c.add_child(proxy_row)
+	# A grid keeps the fields aligned and lets the host field grow instead of
+	# squeezing three controls into one unreadable row.
+	var proxy_grid := GridContainer.new()
+	proxy_grid.columns = 2
+	proxy_grid.add_theme_constant_override("h_separation", 12)
+	proxy_grid.add_theme_constant_override("v_separation", 6)
+	_proxy_host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_proxy_port.custom_minimum_size = Vector2(90, 0)
+	for entry in [
+		["Mode:", _proxy_mode],
+		["Host:", _proxy_host],
+		["Port:", _proxy_port],
+	]:
+		var key := Label.new()
+		key.text = str(entry[0])
+		proxy_grid.add_child(key)
+		proxy_grid.add_child(entry[1])
+	c.add_child(proxy_grid)
 	
 	action_row(c, "Apply Proxy", "Save proxy settings system-wide.", "A", "Apply", func() -> void:
 		_apply_proxy()
@@ -140,7 +144,7 @@ func _create_hotspot() -> void:
 	
 	var pass_edit := LineEdit.new()
 	pass_edit.placeholder_text = "Minimum 8 characters"
-	pass_edit.text = "kainat123"
+	pass_edit.text = _random_password()
 	pass_edit.secret = true
 	
 	var vbox := VBoxContainer.new()
@@ -183,6 +187,16 @@ func _stop_hotspot() -> void:
 		notify("Failed to stop hotspot.")
 
 
+# Hotspot passwords must be 8+ chars and easy to read out loud: no ambiguous
+# characters (0/O, 1/l/I) since the user types this on a phone.
+func _random_password() -> String:
+	const ALPHABET := "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	var out := ""
+	for _i in 12:
+		out += ALPHABET[randi() % ALPHABET.length()]
+	return out
+
+
 func _nmcli_available() -> bool:
 	return Sh.has_tool("nmcli")
 
@@ -197,7 +211,9 @@ func _populate_status() -> void:
 		unavailable_row(c, "Network", "No devices reported")
 		return
 	for line in devices:
-		var parts: PackedStringArray = line.split(":")
+		# nmcli escapes ':' inside values; splitting with a limit keeps a
+		# connection name that contains a colon intact in the last field.
+		var parts: PackedStringArray = line.split(":", true, 4)
 		if parts.size() >= 3:
 			var label: String = "%s (%s)" % [parts[0], parts[1]]
 			var state: String = parts[2]
@@ -207,14 +223,14 @@ func _populate_status() -> void:
 
 
 func _open_network() -> void:
-	if Sh.has_tool("plasma-nm"):
-		Sh.launch("plasma-nm")
-	elif Sh.has_tool("nm-connection-editor"):
-		Sh.launch("nm-connection-editor")
-	elif Sh.has_tool("nmcli"):
-		Sh.run("nmcli device wifi list; nmcli device status")
-	else:
-		Sh._notify_missing("nmcli", "Network configuration", notify)
+	for tool in ["plasma-nm", "nm-connection-editor"]:
+		if Sh.has_tool(tool):
+			Sh.launch(tool)
+			return
+	if Sh.has_tool("systemsettings"):
+		Sh.open_kcm("kcm_networkmanagement")
+		return
+	Sh._notify_missing("plasma-nm", "Network configuration", notify)
 
 
 func _set_bluetooth(on: bool) -> void:

@@ -69,6 +69,32 @@ func _run_lazy() -> void:
 		Input.set_default_cursor_shape(Input.CURSOR_ARROW))
 
 
+# Run a shell command without freezing the UI and report its exit code to
+# on_done. Long jobs (apt, pkexec) can take minutes; a blocking wait would make
+# the window unresponsive and look like a crash. The command is wrapped so its
+# exit status lands in a temporary file, which a timer polls.
+func run_async(command: String, on_done: Callable) -> void:
+	var status_file := "/tmp/kainat-task-" + str(Time.get_ticks_usec()) + ".status"
+	var pid := OS.create_process("bash", ["-c", command + "\nprintf '%s' $? > " + Sh.quote(status_file)])
+	if pid <= 0:
+		on_done.call(-1)
+		return
+
+	var timer := Timer.new()
+	timer.wait_time = 0.4
+	add_child(timer)
+	var poll := func() -> void:
+		if not FileAccess.file_exists(status_file):
+			return
+		timer.stop()
+		timer.queue_free()
+		var code := FileAccess.get_file_as_string(status_file).strip_edges().to_int()
+		DirAccess.remove_absolute(status_file)
+		on_done.call(code)
+	timer.timeout.connect(poll)
+	timer.start()
+
+
 # --- theming helpers --------------------------------------------------------
 
 func _accent() -> Color:

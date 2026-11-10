@@ -1,157 +1,113 @@
 extends SettingsPanel
-# Input Methods: Install and configure IMEs for CJK, Arabic, and other languages.
-# Uses fcitx5 as the primary input method framework.
+# Input Methods: install and configure IMEs for CJK, Arabic and other scripts.
+# fcitx5 is the recommended framework; IBus is offered as the alternative.
 
-var _installed_engines: Dictionary = {}
+var _installed: Dictionary = {}
 
 
 func build() -> void:
 	page_header("Input Methods", "Install and configure input method editors for your language.")
-	
 	_check_installed()
 	_build_ui()
 
 
 func _check_installed() -> void:
-	_installed_engines["fcitx5"] = Sh.is_package_installed("fcitx5")
-	_installed_engines["fcitx5-googlepinyin"] = Sh.is_package_installed("fcitx5-googlepinyin")
-	_installed_engines["fcitx5-mozc"] = Sh.is_package_installed("fcitx5-mozc")
-	_installed_engines["fcitx5-table-extra"] = Sh.is_package_installed("fcitx5-table-extra")
-	_installed_engines["ibus"] = Sh.is_package_installed("ibus")
-	_installed_engines["ibus-pinyin"] = Sh.is_package_installed("ibus-pinyin")
-	_installed_engines["ibus-mozc"] = Sh.is_package_installed("ibus-mozc")
-	
-	# Check current input method
-	var current_im := Sh.run_capture("echo $GTK_IM_MODULE").strip_edges()
-	if current_im.is_empty():
-		current_im = Sh.run_capture("echo $QT_IM_MODULE").strip_edges()
-	if current_im.is_empty():
-		current_im = Sh.kde_read("kdeglobals", "KDE", "IMModule", "").strip_edges()
+	for package in [
+		"fcitx5", "fcitx5-chinese-addons", "fcitx5-mozc", "fcitx5-table-extra",
+		"fcitx5-hangul", "ibus", "ibus-pinyin", "ibus-mozc",
+	]:
+		_installed[package] = Sh.is_package_installed(package)
+
+
+# Rebuild after an install so the rows switch from "Install" to "Installed".
+func _rebuild() -> void:
+	for child in content.get_children():
+		content.remove_child(child)
+		child.queue_free()
+	_check_installed()
+	_build_ui()
 
 
 func _build_ui() -> void:
-	# Framework selector
 	section("Input Method Framework")
 	var c := card()
+	var frameworks: Array = ["fcitx5 (recommended)", "IBus"]
+	var current := Sh.get_input_method_framework()
+	choice_row(c, "Framework", "Engine that handles typing in other languages.", "F",
+		frameworks, 0 if current == "fcitx5" else 1, func(index: int) -> void:
+			var fw := "fcitx5" if index == 0 else "ibus"
+			Sh.set_input_method_framework(fw)
+			notify("Framework set to " + fw + ". Log out and back in to apply."))
 
-	action_row(c, "Input Framework", "Choose the input method framework.", "F", "Select", func() -> void:
-		var fw: String = "fcitx5" if _installed_engines["fcitx5"] else "ibus"
-		Sh.set_input_method_framework(fw)
-		notify("Input framework set to " + fw + ". Log out and back in to apply."))
-	
-	# Chinese (Simplified) - Pinyin
-	section("Chinese (Simplified) / 中文 (简体)")
-	c = card()
-	
-	if _installed_engines["fcitx5-googlepinyin"]:
-		info_row(c, "Google Pinyin (fcitx5)", "Installed")
-	else:
-		info_row(c, "Google Pinyin (fcitx5)", "Not installed")
-		action_row(c, "Install Google Pinyin", "Smart Pinyin input with cloud suggestions.", "G", "Install", func():
-			notify("Installing fcitx5-googlepinyin...")
-			Sh.install_cjk_support()
-			notify("Installed. Restart session to activate.")
-			_check_installed()
-			_build_ui()  # Rebuild
-		)
-	
-	if _installed_engines["ibus-pinyin"]:
-		info_row(c, "Pinyin (IBus)", "Installed")
-	else:
-		info_row(c, "Pinyin (IBus)", "Not installed")
-		action_row(c, "Install IBus Pinyin", "Standard Pinyin for IBus.", "P", "Install", func():
-			notify("Installing ibus-pinyin...")
-			Sh.run_wait("pkexec apt install -y ibus-pinyin")
-			notify("Installed. Restart session to activate.")
-		)
-	
-	# Chinese (Traditional) / 日本語
-	section("Chinese (Traditional) / 日本語")
-	c = card()
-	
-	if _installed_engines["fcitx5-mozc"]:
-		info_row(c, "Mozc (Japanese)", "Installed")
-	else:
-		info_row(c, "Mozc (Japanese)", "Not installed")
-		action_row(c, "Install Mozc", "Japanese input (Hiragana/Katakana/Kanji).", "M", "Install", func():
-			notify("Installing fcitx5-mozc...")
-			Sh.install_cjk_support()
-			notify("Installed. Restart session to activate.")
-		)
-	
-	if _installed_engines["ibus-mozc"]:
-		info_row(c, "Mozc (IBus)", "Installed")
-	else:
-		info_row(c, "Mozc (IBus)", "Not installed")
-		action_row(c, "Install IBus Mozc", "Japanese input for IBus.", "M", "Install", func():
-			notify("Installing ibus-mozc...")
-			Sh.run_wait("pkexec apt install -y ibus-mozc")
-			notify("Installed. Restart session to activate.")
-		)
-	
-	# Korean / 한국어
-	section("Korean / 한국어")
-	c = card()
-	
-	if _installed_engines["fcitx5-table-extra"]:
-		info_row(c, "Hangul (fcitx5)", "Available via table-extra")
-	else:
-		info_row(c, "Hangul (fcitx5)", "Not installed")
-		action_row(c, "Install Hangul Tables", "Korean input tables for fcitx5.", "H", "Install", func():
-			notify("Installing fcitx5-table-extra...")
-			Sh.install_cjk_support()
-			notify("Installed. Restart session to activate.")
-		)
-	
-	# Arabic / العربية
-	section("Arabic / العربية")
-	c = card()
-	
-	if _installed_engines["fcitx5-table-extra"]:
-		info_row(c, "Arabic (fcitx5)", "Available via table-extra")
-	else:
-		info_row(c, "Arabic (fcitx5)", "Not installed")
-		action_row(c, "Install Arabic Tables", "Arabic keyboard layouts and tables.", "A", "Install", func():
-			notify("Installing fcitx5-table-extra...")
-			Sh.install_arabic_support()
-			notify("Installed. Restart session to activate.")
-		)
-	
-	# Configuration & Tools
+	_add_engine_section("Chinese (Simplified) / 中文 (简体)", [
+		{"title": "Pinyin (fcitx5)", "package": "fcitx5-chinese-addons", "hint": "Pinyin, Shuangpin and Wubi input."},
+		{"title": "Pinyin (IBus)", "package": "ibus-pinyin", "hint": "Pinyin input for IBus."},
+	])
+	_add_engine_section("Japanese / 日本語", [
+		{"title": "Mozc (fcitx5)", "package": "fcitx5-mozc", "hint": "Hiragana, Katakana and Kanji input."},
+		{"title": "Mozc (IBus)", "package": "ibus-mozc", "hint": "Japanese input for IBus."},
+	])
+	_add_engine_section("Korean / 한국어", [
+		{"title": "Hangul (fcitx5)", "package": "fcitx5-hangul", "hint": "Hangul input for fcitx5."},
+	])
+	_add_engine_section("Arabic / العربية", [
+		{"title": "Arabic tables (fcitx5)", "package": "fcitx5-table-extra", "hint": "Arabic keyboard tables for fcitx5."},
+	])
+
 	section("Configuration")
 	c = card()
-	
 	if Sh.has_tool("fcitx5-configtool"):
-		kcm_row(c, "Fcitx5 Configuration", "Configure input methods, keyboards, and addons.", "F", "kcm_fcitx5")
-	elif Sh.has_tool("fcitx5-config-qt"):
-		action_row(c, "Fcitx5 Configuration", "Open Fcitx5 configuration tool.", "F", "Open", func():
-			Sh.launch("fcitx5-config-qt")
-		)
-	
+		action_row(c, "Fcitx5 Configuration", "Add engines, switch hotkeys, tune addons.", "F", "Open", func() -> void:
+			Sh.launch("fcitx5-configtool"))
 	if Sh.has_tool("ibus-setup"):
-		kcm_row(c, "IBus Configuration", "Configure IBus engines and preferences.", "I", "kcm_ibus")
-	
-	action_row(c, "Restart Input Method", "Restart fcitx5/IBus after installing new engines.", "R", "Restart", func():
-		Sh.run("pkill -f fcitx5; fcitx5 -d &")
-		Sh.run("ibus restart &")
-		notify("Input methods restarted.")
-	)
-	
-	# Current status
+		action_row(c, "IBus Configuration", "Manage engines and preferences.", "I", "Open", func() -> void:
+			Sh.launch("ibus-setup"))
+	action_row(c, "Restart Input Methods", "Pick up newly installed engines now.", "R", "Restart", func() -> void:
+		_restart_daemons())
+	if not Sh.has_tool("fcitx5-configtool") and not Sh.has_tool("ibus-setup"):
+		info_row(c, "No configuration tool", "Install fcitx5 or IBus first.")
+
 	section("Current Session")
 	c = card()
-	var current_im := Sh.run_capture("echo $GTK_IM_MODULE").strip_edges()
-	if current_im.is_empty():
-		current_im = Sh.run_capture("echo $QT_IM_MODULE").strip_edges()
-	if current_im.is_empty():
-		current_im = "Unknown (system default)"
-	info_row(c, "Active IM Module", current_im)
-	
-	var fcitx_status := "Not running"
-	if not Sh.run_capture("pgrep fcitx5").strip_edges().is_empty():
-		fcitx_status = "Running (fcitx5)"
-	elif not Sh.run_capture("pgrep ibus-daemon").strip_edges().is_empty():
-		fcitx_status = "Running (IBus)"
-	info_row(c, "Daemon Status", fcitx_status)
-	
-	info_row(c, "Note", "Changes require logging out and back in, or restarting the session.")
+	info_row(c, "Active Framework", Sh.get_input_method_framework())
+	info_row(c, "Daemon", _daemon_status())
+	info_row(c, "Note", "Log out and back in after installing a framework.")
+
+
+func _add_engine_section(title: String, engines: Array) -> void:
+	section(title)
+	var c := card()
+	for engine in engines:
+		var package: String = str(engine["package"])
+		if bool(_installed.get(package, false)):
+			info_row(c, str(engine["title"]), "Installed")
+			continue
+		info_row(c, str(engine["title"]), "Not installed")
+		action_row(c, "Install " + str(engine["title"]), str(engine["hint"]), "I", "Install", func() -> void:
+			_install(package))
+
+
+func _install(package: String) -> void:
+	notify("Installing " + package + "... This may take a few minutes.")
+	run_async(Sh.install_command(package), func(code: int) -> void:
+		if code != 0:
+			notify("Could not install " + package + ". Check your internet connection.")
+			return
+		notify(package + " installed.")
+		_rebuild())
+
+
+func _restart_daemons() -> void:
+	if Sh.has_tool("fcitx5"):
+		Sh.run("pkill -x fcitx5 >/dev/null 2>&1; fcitx5 -d >/dev/null 2>&1 &")
+	if Sh.has_tool("ibus-daemon"):
+		Sh.run("ibus restart >/dev/null 2>&1 &")
+	notify("Input methods restarted.")
+
+
+func _daemon_status() -> String:
+	if not Sh.run_capture("pgrep -x fcitx5").strip_edges().is_empty():
+		return "Running (fcitx5)"
+	if not Sh.run_capture("pgrep -x ibus-daemon").strip_edges().is_empty():
+		return "Running (IBus)"
+	return "Not running"

@@ -36,11 +36,10 @@ func build() -> void:
 	browse_btn.pressed.connect(_on_browse)
 	drop_zone.add_child(browse_btn)
 	
-	# Make it a drop target
-	drop_zone.mouse_entered.connect(_on_drag_enter.bind(drop_zone))
-	drop_zone.mouse_exited.connect(_on_drag_exit.bind(drop_zone))
-	if is_inside_tree():
-		get_window().files_dropped.connect(_on_files_dropped)
+	# OS file drops are delivered by the window, not by this control.
+	var window := get_window()
+	if window != null:
+		window.files_dropped.connect(_on_files_dropped)
 	
 	# Info section
 	var info_section := VBoxContainer.new()
@@ -124,14 +123,6 @@ func _on_file_selected(path: String) -> void:
 	_update_ui()
 
 
-func _on_drag_enter(zone: VBoxContainer) -> void:
-	zone.add_theme_stylebox_override("panel", _make_drop_stylebox(Color(0.3, 0.6, 1.0, 0.3)))
-
-
-func _on_drag_exit(zone: VBoxContainer) -> void:
-	zone.add_theme_stylebox_override("panel", _make_drop_stylebox(Color(0.1, 0.1, 0.1, 0.1)))
-
-
 func _on_files_dropped(files: PackedStringArray) -> void:
 	# Window.files_dropped: OS file drag-and-drop onto the app window.
 	for file in files:
@@ -189,45 +180,46 @@ func _on_install() -> void:
 	if _file_path.is_empty() or _file_type == "unknown":
 		notify("No valid file selected")
 		return
-	
-	var output_label := content.find_child("output_label", true, false)
-	output_label.text = "Working..."
-	
-	notify("Processing " + _file_path.get_file() + "...")
-	
-	var code: int = -1
+
 	match _file_type:
-		"deb":
-			code = Sh.install_deb_file(_file_path)
-		"rpm":
-			code = Sh.install_rpm_file(_file_path)
 		"appimage":
-			code = Sh.run_appimage(_file_path)
+			_report(Sh.run_appimage(_file_path))
 		"exe":
-			code = Sh.run_wine_exe(_file_path)
+			if not Sh.has_tool("wine"):
+				Sh._notify_missing("wine", "Windows applications", notify)
+				return
+			_report(Sh.run_wine_exe(_file_path))
+		"deb":
+			_start(Sh.deb_install_command(_file_path))
+		"rpm":
+			_start(Sh.rpm_install_command(_file_path))
 		"flatpakref":
-			code = Sh.run_wait("flatpak install " + Sh.quote(_file_path))
+			_start("flatpak install -y --noninteractive " + Sh.quote(_file_path))
 		"snap":
-			code = Sh.run_wait("pkexec snap install " + Sh.quote(_file_path))
-	
+			_start("pkexec snap install --dangerous " + Sh.quote(_file_path))
+
+
+# Long installs run in the background so the window keeps repainting while apt
+# works and the polkit password prompt is on screen.
+func _start(command: String) -> void:
+	_install_btn.disabled = true
+	_output("Working... You may be asked for your password.")
+	notify("Processing " + _file_path.get_file() + "...")
+	run_async(command, func(code: int) -> void:
+		_report(code)
+		_install_btn.disabled = false)
+
+
+func _report(code: int) -> void:
 	if code == 0:
-		output_label.text = "✅ Success! " + _file_path.get_file() + " processed."
+		_output("✅ Success! " + _file_path.get_file() + " processed.")
 		notify("Done!")
 	else:
-		output_label.text = "❌ Failed (exit code: " + str(code) + ")"
-		notify("Installation failed. Check terminal for details.")
+		_output("❌ Failed (exit code " + str(code) + ").")
+		notify("Installation failed.")
 
 
-func _make_drop_stylebox(bg_color: Color) -> StyleBoxFlat:
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = bg_color
-	sb.border_width_top = 2
-	sb.border_width_bottom = 2
-	sb.border_width_left = 2
-	sb.border_width_right = 2
-	sb.border_color = Color(0.4, 0.7, 1.0)
-	sb.corner_radius_top_left = 8
-	sb.corner_radius_top_right = 8
-	sb.corner_radius_bottom_left = 8
-	sb.corner_radius_bottom_right = 8
-	return sb
+func _output(text: String) -> void:
+	var label := content.find_child("output_label", true, false) as Label
+	if label != null:
+		label.text = text

@@ -418,8 +418,14 @@ static func is_package_installed(package: String) -> bool:
 	return not output.strip_edges().is_empty()
 
 
+static func install_command(package: String) -> String:
+	# One authorisation prompt for both steps; `;` so a stale list update still
+	# lets the install attempt run and report its own error.
+	return "pkexec sh -c " + quote("apt-get update; apt-get install -y " + quote(package))
+
+
 static func install_package(package: String) -> int:
-	return run_wait("pkexec apt update && pkexec apt install -y " + quote(package))
+	return run_wait(install_command(package))
 
 
 # --- disk manager helpers ---------------------------------------------------
@@ -518,7 +524,9 @@ static func get_ssh_public_key(key_path: String) -> String:
 # --- input method helpers ---------------------------------------------------
 
 static func install_cjk_support() -> int:
-	return run_wait("pkexec apt install -y fcitx5 fcitx5-googlepinyin fcitx5-mozc fcitx5-table-extra")
+	# fcitx5-chinese-addons is the Debian package that ships Pinyin; there is no
+	# fcitx5-googlepinyin package in Debian and asking for it fails the install.
+	return run_wait("pkexec apt install -y fcitx5 fcitx5-chinese-addons fcitx5-mozc fcitx5-table-extra")
 
 
 static func install_arabic_support() -> int:
@@ -528,29 +536,81 @@ static func install_arabic_support() -> int:
 # --- hotspot helpers --------------------------------------------------------
 
 static func create_wifi_hotspot(ssid: String, password: String) -> int:
-	return run_wait("nmcli dev wifi hotspot con-name 'Kainat-Hotspot' ssid " + quote(ssid) + " password " + quote(password))
+	# nmcli refuses to reuse an existing profile name, so drop a stale one first.
+	return run_wait(
+		"nmcli con delete 'Kainat-Hotspot' >/dev/null 2>&1; "
+		+ "nmcli dev wifi hotspot con-name 'Kainat-Hotspot' ssid " + quote(ssid)
+		+ " password " + quote(password)
+	)
 
 
 static func stop_wifi_hotspot() -> int:
-	return run_wait("nmcli con down 'Kainat-Hotspot' && nmcli con delete 'Kainat-Hotspot'")
+	# `;` rather than `&&`: an already-down profile must still be deleted.
+	return run_wait(
+		"nmcli con down 'Kainat-Hotspot' >/dev/null 2>&1; "
+		+ "nmcli con delete 'Kainat-Hotspot' >/dev/null 2>&1"
+	)
 
 
 # --- proxy helpers ----------------------------------------------------------
 
 static func set_system_proxy(mode: String, host: String = "", port: String = "") -> void:
 	# mode: "manual", "auto", "none"
+	# Plasma apps read kioslaverc, GTK apps read the GNOME proxy schema, so both
+	# are written; otherwise half the desktop would ignore the setting.
+	var proxy_type := "0"
+	if mode == "manual":
+		proxy_type = "1"
+	elif mode == "auto":
+		proxy_type = "2"
+	kde_write("kioslaverc", "Proxy Settings", "ProxyType", proxy_type)
+
+	var p := port if not port.is_empty() else "8080"
+	if mode == "manual" and not host.is_empty():
+		# KIO stores "scheme://host port" in a single value.
+		var endpoint := "http://" + host + " " + p
+		kde_write("kioslaverc", "Proxy Settings", "httpProxy", endpoint)
+		kde_write("kioslaverc", "Proxy Settings", "httpsProxy", endpoint)
+		kde_write("kioslaverc", "Proxy Settings", "ftpProxy", endpoint)
+		kde_write("kioslaverc", "Proxy Settings", "socksProxy", "socks://" + host + " " + p)
+
 	run("gsettings set org.gnome.system.proxy mode " + quote(mode))
 	if mode == "manual" and not host.is_empty():
-		run("gsettings set org.gnome.system.proxy.http host " + quote(host))
-		run("gsettings set org.gnome.system.proxy.http port " + quote(port))
-		run("gsettings set org.gnome.system.proxy.https host " + quote(host))
-		run("gsettings set org.gnome.system.proxy.https port " + quote(port))
+		run("gsettings set org.gnome.system.proxy use-same-proxy true")
+		for scheme in ["http", "https", "socks"]:
+			run("gsettings set org.gnome.system.proxy." + scheme + " host " + quote(host))
+			run("gsettings set org.gnome.system.proxy." + scheme + " port " + quote(p))
+
+	# Running KIO jobs cache the old configuration until told to re-read it.
+	run("dbus-send --type=signal /KIO/Scheduler "
+		+ "org.kde.KIO.Scheduler.reparseSlaveConfiguration string:'' >/dev/null 2>&1")
 
 
 static func get_system_proxy() -> Dictionary:
-	var mode := run_capture("gsettings get org.gnome.system.proxy mode").strip_edges().trim_prefix("'").trim_suffix("'")
-	var host := run_capture("gsettings get org.gnome.system.proxy.http host").strip_edges().trim_prefix("'").trim_suffix("'")
-	var port := run_capture("gsettings get org.gnome.system.proxy.http port").strip_edges()
+	var mode := kde_read("kioslaverc", "Proxy Settings", "ProxyType", "")
+	if mode == "1":
+		mode = "manual"
+	elif mode == "2":
+		mode = "auto"
+	elif mode != "0":
+		mode = run_capture("gsettings get org.gnome.system.proxy mode").strip_edges().trim_prefix("'").trim_suffix("'")
+	else:
+		mode = "none"
+
+	var host := ""
+	var port := ""
+	var endpoint := kde_read("kioslaverc", "Proxy Settings", "httpProxy", "")
+	if not endpoint.is_empty():
+		endpoint = endpoint.trim_prefix("http://").trim_prefix("https://")
+		var cut: int = endpoint.rfind(" ")
+		if cut > 0:
+			host = endpoint.substr(0, cut).strip_edges()
+			port = endpoint.substr(cut + 1).strip_edges()
+		else:
+			host = endpoint.strip_edges()
+	if host.is_empty():
+		host = run_capture("gsettings get org.gnome.system.proxy.http host").strip_edges().trim_prefix("'").trim_suffix("'")
+		port = run_capture("gsettings get org.gnome.system.proxy.http port").strip_edges()
 	return {"mode": mode, "host": host, "port": port}
 
 
@@ -594,20 +654,44 @@ static func toggle_apt_source(file_path: String, enabled: bool) -> int:
 
 # --- universal installer helpers --------------------------------------------
 
+# Command strings are exposed so callers can run the long installs through
+# SettingsPanel.run_async() instead of freezing the window.
+static func deb_install_command(path: String) -> String:
+	# One authorisation prompt. `;` (not `&&`) because apt-get -f still has to
+	# repair dependencies when dpkg itself reports an error.
+	return "pkexec sh -c " + quote("dpkg -i " + quote(path) + "; apt-get install -f -y")
+
+
 static func install_deb_file(path: String) -> int:
-	return run_wait("pkexec dpkg -i " + quote(path) + " && pkexec apt-get install -f -y")
+	return run_wait(deb_install_command(path))
+
+
+static func rpm_install_command(path: String) -> String:
+	# alien is installed only when missing, so repeat runs need one prompt.
+	return "pkexec sh -c " + quote(
+		"command -v alien >/dev/null 2>&1 || apt-get install -y alien; alien -i " + quote(path)
+	)
 
 
 static func install_rpm_file(path: String) -> int:
-	return run_wait("pkexec apt install -y alien && pkexec alien -i " + quote(path))
+	return run_wait(rpm_install_command(path))
 
 
 static func run_appimage(path: String) -> int:
-	return run_wait("chmod +x " + quote(path) + " && " + quote(path))
+	# Launch detached: the app may run for hours and must not block the caller.
+	var code := run_wait("chmod +x " + quote(path))
+	if code != 0:
+		return code
+	run(quote(path) + " >/dev/null 2>&1 &")
+	return 0
 
 
 static func run_wine_exe(path: String) -> int:
-	return run_wait("pkexec wine " + quote(path))
+	# Wine must run as the user: a root-owned prefix breaks the user's setup.
+	if not has_tool("wine"):
+		return 127
+	run("wine " + quote(path) + " >/dev/null 2>&1 &")
+	return 0
 
 
 # --- system reset helpers ---------------------------------------------------
@@ -661,20 +745,115 @@ static func reset_user_settings() -> int:
 
 # --- accessibility helpers --------------------------------------------------
 
+# Plasma ships high contrast as a color scheme, so switching it is a normal
+# scheme change (no plasmashell restart, no lost windows). GTK apps follow the
+# GNOME setting instead, so both are updated.
+static func _high_contrast_scheme() -> String:
+	for base in ["/usr/share/color-schemes", home() + "/.local/share/color-schemes"]:
+		for candidate in ["BreezeHighContrast", "Breeze High Contrast", "HighContrast", "High Contrast"]:
+			if FileAccess.file_exists(base.path_join(candidate + ".colors")):
+				return candidate
+	return ""
+
+
 static func set_high_contrast(enabled: bool) -> void:
-	var val := "true" if enabled else "false"
-	run("gsettings set org.gnome.desktop.interface high-contrast-enabled " + val)
-	# Also trigger Plasma reload
-	run("systemctl --user restart plasma-kaccess.service >/dev/null 2>&1 &")
-	run("plasmashell --replace >/dev/null 2>&1 &")
+	run("gsettings set org.gnome.desktop.interface high-contrast-enabled "
+		+ ("true" if enabled else "false"))
+
+	var scheme := _high_contrast_scheme()
+	if scheme.is_empty() or not has_tool("plasma-apply-colorscheme"):
+		return
+	if enabled:
+		var current := kde_read("kdeglobals", "General", "ColorScheme", "")
+		if not current.is_empty() and current != scheme:
+			kde_write("kdeglobals", "KainatSettings", "SchemeBeforeHighContrast", current)
+		run("plasma-apply-colorscheme " + quote(scheme))
+	else:
+		var previous := kde_read("kdeglobals", "KainatSettings", "SchemeBeforeHighContrast", "BreezeDark")
+		run("plasma-apply-colorscheme " + quote(previous))
 
 
 static func get_high_contrast() -> bool:
+	var scheme := _high_contrast_scheme()
+	if not scheme.is_empty():
+		return kde_read("kdeglobals", "General", "ColorScheme", "") == scheme
 	var val := run_capture("gsettings get org.gnome.desktop.interface high-contrast-enabled").strip_edges().trim_prefix("'").trim_suffix("'")
 	return val == "true"
 
 
+# --- display scaling --------------------------------------------------------
+
+# Output names as reported by KScreen, or an empty list when kscreen-doctor is
+# unavailable. Used for scale changes, which are per-output in Plasma.
+static func _output_names() -> Array[String]:
+	var names: Array[String] = []
+	var raw := run_capture("kscreen-doctor -j 2>/dev/null")
+	if raw.strip_edges().is_empty():
+		return names
+	var data: Variant = JSON.parse_string(raw)
+	if not (data is Dictionary):
+		return names
+	var outputs: Variant = data.get("outputs", [])
+	if not (outputs is Array):
+		return names
+	for output in outputs:
+		if output is Dictionary:
+			var name: Variant = output.get("name", null)
+			if name is String and not str(name).is_empty():
+				names.append(str(name))
+	return names
+
+
+# Scale of the first output (all outputs are kept in sync), or -1 if unknown.
+static func ui_scale() -> float:
+	var raw := run_capture("kscreen-doctor -j 2>/dev/null")
+	if raw.strip_edges().is_empty():
+		return -1.0
+	var data: Variant = JSON.parse_string(raw)
+	if not (data is Dictionary):
+		return -1.0
+	var outputs: Variant = data.get("outputs", [])
+	if not (outputs is Array):
+		return -1.0
+	for output in outputs:
+		if output is Dictionary:
+			var scale: Variant = output.get("scale", null)
+			if scale is float or scale is int:
+				return float(scale)
+	return -1.0
+
+
+# Apply one scale factor to every connected output. False means kscreen-doctor
+# is missing or refused the change.
+static func set_ui_scale(scale: float) -> bool:
+	var names := _output_names()
+	if names.is_empty():
+		return false
+	var applied := false
+	for name in names:
+		var cmd := "kscreen-doctor output." + name + ".scale." + str(scale) + " 2>/dev/null"
+		if run_wait(cmd) == 0:
+			applied = true
+	return applied
+
+
 # --- input method helpers ---------------------------------------------------
+
+static func get_input_method_framework() -> String:
+	var configured := kde_read("kdeglobals", "KDE", "IMModule", "")
+	if configured == "fcitx5" or configured == "ibus":
+		return configured
+	if not run_capture("pgrep -x fcitx5").strip_edges().is_empty():
+		return "fcitx5"
+	if not run_capture("pgrep -x ibus-daemon").strip_edges().is_empty():
+		return "ibus"
+	var env := run_capture("printenv QT_IM_MODULE")
+	if env.contains("fcitx"):
+		return "fcitx5"
+	if env.contains("ibus"):
+		return "ibus"
+	return "fcitx5"
+
 
 static func set_input_method_framework(framework: String) -> void:
 	var fw := framework.strip_edges()
