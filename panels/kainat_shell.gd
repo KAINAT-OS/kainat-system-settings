@@ -241,12 +241,15 @@ static func kde_read(file: String, group: String, key: String, default_value: St
 
 
 static func kde_write(file: String, group: String, key: String, value: String,
-		subgroup: String = "") -> void:
+		subgroup: String = "", value_type: String = "") -> void:
 	if has_tool("kwriteconfig6"):
 		var cmd := "kwriteconfig6 --file " + quote(file) + " --group " + quote(group)
 		if not subgroup.is_empty():
 			cmd += " --group " + quote(subgroup)
-		cmd += " --key " + quote(key) + " " + quote(value)
+		cmd += " --key " + quote(key)
+		if not value_type.is_empty():
+			cmd += " --type " + quote(value_type)
+		cmd += " " + quote(value)
 		# Synchronous: callers rely on the value being on disk before they
 		# notify/reload dependent services (e.g. PowerDevil reparseConfiguration).
 		run_capture(cmd)
