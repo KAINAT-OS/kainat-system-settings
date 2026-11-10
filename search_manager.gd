@@ -40,6 +40,21 @@ func _scan_panel(panel_name: String) -> void:
 	# matches twice in the source but only ever renders once. Without this the
 	# results list showed the same entry twice (e.g. "Resolution" in displays).
 	var seen: Dictionary = {}
+
+	# The page title itself is worth finding: searching "backups" should open
+	# the Backups page even when no row repeats the word.
+	var header := RegEx.new()
+	header.compile("page_header\\(\\s*\"([^\"]+)\"\\s*,\\s*\"([^\"]*)\"")
+	var header_match := header.search(text)
+	if header_match:
+		var header_title := header_match.get_string(1)
+		seen[header_title] = true
+		_index.append({
+			"panel": panel_name,
+			"title": header_title,
+			"subtitle": header_match.get_string(2),
+		})
+
 	for m in regex.search_all(text):
 		var title := m.get_string(1)
 		if seen.has(title):
