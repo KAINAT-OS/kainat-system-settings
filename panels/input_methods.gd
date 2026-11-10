@@ -12,11 +12,10 @@ func build() -> void:
 
 
 func _check_installed() -> void:
-	for package in [
+	_installed = Sh.installed_packages([
 		"fcitx5", "fcitx5-chinese-addons", "fcitx5-mozc", "fcitx5-table-extra",
 		"fcitx5-hangul", "ibus", "ibus-pinyin", "ibus-mozc",
-	]:
-		_installed[package] = Sh.is_package_installed(package)
+	])
 
 
 # Rebuild after an install so the rows switch from "Install" to "Installed".
@@ -38,6 +37,14 @@ func _build_ui() -> void:
 			var fw := "fcitx5" if index == 0 else "ibus"
 			Sh.set_input_method_framework(fw)
 			notify("Framework set to " + fw + ". Log out and back in to apply."))
+
+	# The framework itself has to be installed before any engine is useful.
+	if not bool(_installed.get("fcitx5", false)):
+		action_row(c, "Install fcitx5", "The recommended input method framework.", "F", "Install", func() -> void:
+			_install("fcitx5"))
+	if not bool(_installed.get("ibus", false)):
+		action_row(c, "Install IBus", "The alternative input method framework.", "I", "Install", func() -> void:
+			_install("ibus"))
 
 	_add_engine_section("Chinese (Simplified) / 中文 (简体)", [
 		{"title": "Pinyin (fcitx5)", "package": "fcitx5-chinese-addons", "hint": "Pinyin, Shuangpin and Wubi input."},
@@ -93,6 +100,7 @@ func _install(package: String) -> void:
 		if code != 0:
 			notify("Could not install " + package + ". Check your internet connection.")
 			return
+		Sh.clear_tool_cache()
 		notify(package + " installed.")
 		_rebuild())
 

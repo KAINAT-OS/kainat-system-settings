@@ -75,7 +75,7 @@ func _run_lazy() -> void:
 # exit status lands in a temporary file, which a timer polls.
 func run_async(command: String, on_done: Callable) -> void:
 	var status_file := "/tmp/kainat-task-" + str(Time.get_ticks_usec()) + ".status"
-	var pid := OS.create_process("bash", ["-c", command + "\nprintf '%s' $? > " + Sh.quote(status_file)])
+	var pid := OS.create_process("bash", ["-c", Sh.protect_command(command) + "\nprintf '%s' $? > " + Sh.quote(status_file)])
 	if pid <= 0:
 		on_done.call(-1)
 		return
@@ -102,7 +102,7 @@ func run_async_capture(command: String, on_done: Callable) -> void:
 	var out_file := "/tmp/kainat-task-" + stamp + ".out"
 	var status_file := "/tmp/kainat-task-" + stamp + ".status"
 	var pid := OS.create_process("bash", ["-c",
-		"(" + command + ") > " + Sh.quote(out_file) + " 2>&1\nprintf '%s' $? > "
+		"(" + Sh.protect_command(command) + ") > " + Sh.quote(out_file) + " 2>&1\nprintf '%s' $? > "
 		+ Sh.quote(status_file)])
 	if pid <= 0:
 		on_done.call(-1, "")
@@ -502,7 +502,12 @@ func nav_row(card_box: VBoxContainer, title: String, subtitle: String,
 # A row that opens a KCM module.
 func kcm_row(card_box: VBoxContainer, title: String, subtitle: String,
 		glyph: String, module: String) -> void:
-	nav_row(card_box, title, subtitle, glyph, func(): KainatShell.open_kcm(module))
+	if not KainatShell.kcm_available(module):
+		unavailable_row(card_box, title, subtitle + " — the matching KDE module is not installed.", glyph)
+		return
+	nav_row(card_box, title, subtitle, glyph, func() -> void:
+		if not KainatShell.open_kcm(module):
+			notify("Could not open " + title + "."))
 
 
 # A row with a trailing action button.

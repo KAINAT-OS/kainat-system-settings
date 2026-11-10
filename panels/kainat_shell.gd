@@ -17,9 +17,42 @@ static var _tool_cache: Dictionary = {}
 
 # --- process helpers -------------------------------------------------------
 
+# This engine expands $VAR, $1 and `cmd` inside OS.execute()/create_process()
+# argument strings before the shell ever runs them — even inside single
+# quotes — so a command written with ordinary shell quoting loses its
+# variables. Escape exactly those sequences here; bash then performs the
+# expansion once, with the quoting the caller actually wrote.
+static func protect_command(command: String) -> String:
+	var protected := String()
+	var i := 0
+	while i < command.length():
+		var ch := command[i]
+		if ch == "\\":
+			# Keep existing escapes intact and skip the escaped character.
+			protected += ch
+			if i + 1 < command.length():
+				protected += command[i + 1]
+			i += 2
+			continue
+		if ch == "$":
+			var next := command[i + 1] if i + 1 < command.length() else ""
+			var expandable := next == "{" or next == "(" or next == "$" \
+				or (next.length() == 1 and (next.is_valid_identifier() or next.is_valid_int()))
+			protected += "\\$" if expandable else "$"
+			i += 1
+			continue
+		if ch == "`":
+			protected += "\\`"
+			i += 1
+			continue
+		protected += ch
+		i += 1
+	return protected
+
+
 static func run(command: String) -> int:
 	# Fire-and-forget shell command.
-	return OS.create_process("bash", ["-c", command])
+	return OS.create_process("bash", ["-c", protect_command(command)])
 
 
 # Blocking variant of run(): waits for the command to finish and returns its
@@ -29,12 +62,12 @@ static func run(command: String) -> int:
 # pkexec authentication) and keep plain run() for slider/drag spam.
 static func run_wait(command: String, read_stderr: bool = false) -> int:
 	var output: Array = []
-	return OS.execute("bash", ["-c", command], output, read_stderr)
+	return OS.execute("bash", ["-c", protect_command(command)], output, read_stderr)
 
 
 static func run_capture(command: String, read_stderr: bool = false) -> String:
 	var output: Array = []
-	OS.execute("bash", ["-c", command], output, read_stderr)
+	OS.execute("bash", ["-c", protect_command(command)], output, read_stderr)
 	if output.is_empty():
 		return ""
 	return str(output[0])
@@ -83,12 +116,65 @@ static func launch(tool: String, args: Array = []) -> void:
 
 # --- KDE KCM fallback (only used for complex subsystems) -------------------
 
-static func open_kcm(module: String) -> void:
+static var _kcm_names: PackedStringArray = PackedStringArray()
+static var _kcm_scanned: bool = false
+
+
+# Walk the Plasma KCM plugin directories once and remember every module that
+# is actually installed. Without this, kcm_row() would offer buttons that do
+# nothing when the matching package is missing.
+static func _scan_kcms() -> void:
+	if _kcm_scanned:
+		return
+	_kcm_scanned = true
+	var roots: Array[String] = [
+		"/usr/lib/x86_64-linux-gnu/qt6/plugins/plasma/kcms",
+		"/usr/lib/x86_64-linux-gnu/qt5/plugins/plasma/kcms",
+		"/usr/lib/aarch64-linux-gnu/qt6/plugins/plasma/kcms",
+		"/usr/lib/aarch64-linux-gnu/qt5/plugins/plasma/kcms",
+		"/usr/lib/qt6/plugins/plasma/kcms",
+		"/usr/lib/qt5/plugins/plasma/kcms",
+		"/usr/lib64/qt6/plugins/plasma/kcms",
+		"/usr/lib64/qt5/plugins/plasma/kcms",
+	]
+	for root in roots:
+		if not dir_exists(root):
+			continue
+		var pending: Array[String] = [root]
+		while not pending.is_empty():
+			var current: String = pending.pop_back()
+			var dir := DirAccess.open(current)
+			if dir == null:
+				continue
+			for sub in dir.get_directories():
+				pending.append(current.path_join(sub))
+			for file_name in dir.get_files():
+				if file_name.ends_with(".so"):
+					_kcm_names.append(file_name.get_basename())
+
+
+static func kcm_available(module: String) -> bool:
+	_scan_kcms()
+	var base := module
+	if base.begins_with("kcm_"):
+		base = base.substr(4)
+	if _kcm_names.is_empty():
+		# Unknown plugin layout: never hide a module that may well work.
+		return true
+	for name in _kcm_names:
+		if name == base or name == "kcm_" + base:
+			return true
+	return false
+
+
+# Returns false when no KCM launcher is installed so the caller can tell the
+# user instead of silently doing nothing.
+static func open_kcm(module: String) -> bool:
 	for tool in KCM_FALLBACK_TOOLS:
 		if has_tool(tool):
-			OS.create_process(tool, [module])
-			return
+			return OS.create_process(tool, [module]) > 0
 	push_warning("[KainatShell] No KCM launcher available for: " + module)
+	return false
 
 
 # --- privileged writes ------------------------------------------------------
@@ -418,6 +504,30 @@ static func is_package_installed(package: String) -> bool:
 	return not output.strip_edges().is_empty()
 
 
+# Check many packages with a single dpkg-query call. Panels that list dozens of
+# optional components would otherwise spawn one process per package on build.
+static func installed_packages(packages: Array) -> Dictionary:
+	var result := {}
+	var names := PackedStringArray()
+	for package in packages:
+		var name := str(package)
+		if name.is_empty() or name.begins_with("-"):
+			continue
+		result[name] = false
+		names.append(quote(name))
+	if names.is_empty():
+		return result
+	var output: String = run_capture("dpkg-query -W -f='${Package} ${Status}\\n' " + " ".join(names) + " 2>/dev/null")
+	for line in output.split("\n"):
+		var parts: PackedStringArray = line.strip_edges().split(" ", false)
+		if parts.size() < 4:
+			continue
+		# Format: "<package> <want> <error-flag> <status>"
+		if parts[3] == "installed":
+			result[parts[0]] = true
+	return result
+
+
 static func install_command(package: String) -> String:
 	# One authorisation prompt for both steps; `;` so a stale list update still
 	# lets the install attempt run and report its own error.
@@ -643,6 +753,12 @@ static func list_apt_sources() -> Array:
 
 
 static func toggle_apt_source(file_path: String, enabled: bool) -> int:
+	return run_wait(toggle_apt_source_command(file_path, enabled))
+
+
+# Same rewrite as toggle_apt_source() but returns the command so callers can
+# run it through SettingsPanel.run_async() without blocking the UI on pkexec.
+static func toggle_apt_source_command(file_path: String, enabled: bool) -> String:
 	var content: String = read_text(file_path)
 	if enabled:
 		# Enable: uncomment lines starting with # deb
@@ -662,7 +778,11 @@ static func toggle_apt_source(file_path: String, enabled: bool) -> int:
 	# Build the whole inner command first, then quote it once: nesting
 	# quote() inside a hand-written '...' wrapper breaks as soon as the
 	# content itself contains a single quote.
-	return run_wait("pkexec sh -c " + quote("printf %s " + quote(content) + " > " + quote(file_path)))
+	return "pkexec sh -c " + quote("printf %s " + quote(content) + " > " + quote(file_path))
+
+
+static func remove_apt_source_command(file_path: String) -> String:
+	return "pkexec rm -f -- " + quote(file_path)
 
 
 # --- universal installer helpers --------------------------------------------
@@ -881,10 +1001,12 @@ static func set_input_method_framework(framework: String) -> void:
 		DirAccess.make_dir_recursive_absolute(dir)
 	var file := FileAccess.open(dir + "/90-input-method.conf", FileAccess.WRITE)
 	if file != null:
-		var xmod := "@im=fcitx" if fw == "fcitx5" else "@im=ibus"
-		file.store_line("GTK_IM_MODULE=" + fw)
-		file.store_line("QT_IM_MODULE=" + fw)
-		file.store_line("XMODIFIERS=" + xmod)
+		# fcitx5 still registers its Qt/GTK modules under the historical
+		# "fcitx" name; "@im=fcitx" is what both fcitx4 and fcitx5 expect.
+		var im := "fcitx" if fw == "fcitx5" else "ibus"
+		file.store_line("GTK_IM_MODULE=" + im)
+		file.store_line("QT_IM_MODULE=" + im)
+		file.store_line("XMODIFIERS=@im=" + im)
 		file.close()
 
 
