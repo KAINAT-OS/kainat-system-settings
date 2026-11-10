@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="kainat-system-settings"
-config/version="1.4.0"
+config/version="1.4.1"
 run/main_scene="res://main-panel.tscn"
 config/features=PackedStringArray("26.2", "GL Compatibility", "Redot")
 run/low_processor_mode=true
