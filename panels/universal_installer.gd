@@ -180,6 +180,9 @@ func _on_install() -> void:
 	if _file_path.is_empty() or _file_type == "unknown":
 		notify("No valid file selected")
 		return
+	if not Sh.file_exists(_file_path):
+		notify("That file no longer exists: " + _file_path.get_file())
+		return
 
 	match _file_type:
 		"appimage":
@@ -194,8 +197,14 @@ func _on_install() -> void:
 		"rpm":
 			_start(Sh.rpm_install_command(_file_path))
 		"flatpakref":
+			if not Sh.has_tool("flatpak"):
+				Sh._notify_missing("flatpak", "Flatpak packages", notify)
+				return
 			_start("flatpak install -y --noninteractive " + Sh.quote(_file_path))
 		"snap":
+			if not Sh.has_tool("snap"):
+				Sh._notify_missing("snap", "Snap packages", notify)
+				return
 			_start("pkexec snap install --dangerous " + Sh.quote(_file_path))
 
 
@@ -205,18 +214,38 @@ func _start(command: String) -> void:
 	_install_btn.disabled = true
 	_output("Working... You may be asked for your password.")
 	notify("Processing " + _file_path.get_file() + "...")
-	run_async(command, func(code: int) -> void:
-		_report(code)
+	run_async_capture(command, func(code: int, text: String) -> void:
+		_report(code, text)
 		_install_btn.disabled = false)
 
 
-func _report(code: int) -> void:
+func _report(code: int, text: String = "") -> void:
 	if code == 0:
 		_output("✅ Success! " + _file_path.get_file() + " processed.")
 		notify("Done!")
-	else:
+		return
+	# Package managers put the real reason at the end, after pages of progress.
+	var detail := _tail(text)
+	if detail.is_empty():
 		_output("❌ Failed (exit code " + str(code) + ").")
-		notify("Installation failed.")
+	else:
+		_output("❌ Failed (exit code " + str(code) + "):\n" + detail)
+	notify("Installation failed.")
+
+
+# Last few non-empty lines of command output, trimmed to fit the card.
+func _tail(text: String) -> String:
+	var lines := text.strip_edges().split("\n", false)
+	var start := maxi(0, lines.size() - 8)
+	var tail := PackedStringArray()
+	for i in range(start, lines.size()):
+		var line: String = lines[i].strip_edges()
+		if not line.is_empty():
+			tail.append(line)
+	var joined := "\n".join(tail)
+	if joined.length() > 1200:
+		joined = joined.substr(joined.length() - 1200)
+	return joined
 
 
 func _output(text: String) -> void:

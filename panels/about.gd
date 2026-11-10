@@ -20,7 +20,7 @@ func build() -> void:
 	info_row(c, "Operating System", str(rel.get("PRETTY_NAME", "Kainat OS")))
 	info_row(c, "Version", str(rel.get("VERSION", UNAVAILABLE)))
 	info_row(c, "Base", str(rel.get("ID_LIKE", "debian")).capitalize())
-	info_row(c, "Kernel", OS.get_version())
+	info_row(c, "Kernel", _kernel())
 	info_row(c, "Architecture", Engine.get_architecture_name())
 	_hostname_row = info_row(c, "Hostname", "…")
 	_plasma_row = info_row(c, "Desktop", "…")
@@ -41,6 +41,8 @@ func build() -> void:
 	kcm_row(c3, "About This Distribution", "Distro-provided about page.", "A", "kcm_about-distro")
 	kcm_row(c3, "Wayland / Session", "Display server information.", "W", "kcm_wayland")
 	kcm_row(c3, "OpenGL Information", "Graphics stack details.", "G", "kcm_glx")
+	action_row(c3, "Copy System Information", "Paste this into a bug report or support chat.", "C", "Copy", func() -> void:
+		_copy_report())
 
 	# System maintenance section
 	_add_reset_section()
@@ -65,9 +67,41 @@ func _open_page(page_name: String) -> void:
 		menu.virtual_press_button(page_name)
 
 
+# Everything the About page shows, flattened into plain text. Clipboard output
+# is what people paste into issue trackers, so it must not depend on the UI.
+func _system_report() -> String:
+	var rel: Dictionary = Sh.os_release()
+	var lines := PackedStringArray()
+	lines.append("Operating System: " + str(rel.get("PRETTY_NAME", "Kainat OS")))
+	lines.append("Version: " + str(rel.get("VERSION", UNAVAILABLE)))
+	lines.append("Kernel: " + _kernel())
+	lines.append("Architecture: " + Engine.get_architecture_name())
+	lines.append("Hostname: " + _hostname())
+	lines.append("Desktop: " + _plasma_version())
+	lines.append("Session: " + _session())
+	lines.append("Display Server: " + _display_server())
+	lines.append("Processor: " + _cpu_model())
+	lines.append("Memory: " + _memory())
+	lines.append("Graphics: " + _gpu())
+	lines.append("Disk Usage: " + _disk())
+	return "\n".join(lines)
+
+
+func _copy_report() -> void:
+	DisplayServer.clipboard_set(_system_report())
+	notify("System information copied to the clipboard.")
+
+
 func _hostname() -> String:
 	var h: String = Sh.run_capture("hostname").strip_edges()
 	return h if not h.is_empty() else OS.get_environment("HOSTNAME")
+
+
+# OS.get_version() reports the *distribution* version on Linux ("LTS 25.1"),
+# not the kernel, so the kernel has to come from uname.
+func _kernel() -> String:
+	var release := Sh.run_capture("uname -r").strip_edges()
+	return release if not release.is_empty() else UNAVAILABLE
 
 
 # The "Desktop" row used to read kdeglobals [General] Name, which is the
@@ -166,9 +200,11 @@ func _memory() -> String:
 func _gpu() -> String:
 	for line in Sh.run_lines("lspci 2>/dev/null"):
 		if line.contains("VGA compatible controller") or line.contains("3D controller"):
-			var idx: int = line.find(":")
+			# The PCI address also contains a colon ("01:00.0"), so the model
+			# name starts after the ": " that follows the device class.
+			var idx: int = line.find(": ")
 			if idx != -1:
-				return line.substr(idx + 1).strip_edges()
+				return line.substr(idx + 2).strip_edges()
 	return UNAVAILABLE
 
 
@@ -223,9 +259,17 @@ func _run_diagnostics() -> void:
 			output += "  ⚠️ HIGH - Consider cleaning up\n"
 	
 	# Services
-	var failed := Sh.run_capture("systemctl --failed --no-legend 2>/dev/null | wc -l").strip_edges().to_int()
+	var failed_output := Sh.run_capture("systemctl --failed --no-legend 2>/dev/null").strip_edges()
+	var failed := 0
+	if not failed_output.is_empty():
+		failed = failed_output.split("\n", false).size()
 	if failed > 0:
 		output += "\nFailed systemd services: " + str(failed) + "\n"
+		for line in failed_output.split("\n", false):
+			var service: String = line.strip_edges().split(" ", false)[0]
+			if not service.is_empty():
+				output += "  • " + service + "\n"
+		output += "Open System Monitor → Services for details.\n"
 	
 	# Show results
 	var dialog := AcceptDialog.new()

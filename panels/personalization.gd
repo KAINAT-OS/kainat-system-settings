@@ -131,9 +131,7 @@ func build() -> void:
 		scale_names, _current_scale_index(), func(index: int) -> void:
 			_on_scale_changed(index))
 
-	action_row(c4, "Mouse Cursor Size", "Make the pointer easier to see.", "L", "Configure", func() -> void:
-		Sh.open_kcm("kcm_cursortheme")
-	)
+	kcm_row(c4, "Mouse Cursor Size", "Make the pointer easier to see.", "L", "kcm_cursortheme")
 
 	action_row(c4, "Screen Reader (Orca)", "Read the interface out loud.", "R", "Start", func() -> void:
 		if Sh.has_tool("orca"):
