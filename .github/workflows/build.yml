@@ -1,0 +1,223 @@
+name: Build Linux release
+
+# Builds the Linux x86_64 export of Kainat System Settings twice — a normal
+# (release) build and a developer build — and publishes a GitHub Release with
+# both binaries.
+#
+#   * Push a tag like `v1.4.1`  -> build + publish a release for that tag.
+#   * Run the workflow manually -> build; supply a tag to also publish.
+#
+# The engine (Redot) and its export templates are the only external inputs.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Publish a GitHub Release with this tag (leave empty to only build artifacts)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  # Redot engine release used for the export (see Redot-Engine/redot-engine).
+  REDOT_RELEASE: redot-26.2-stable
+  REDOT_ASSET_VERSION: v26.2-stable
+  # Directory name the engine expects under export_templates/ (engine version).
+  REDOT_TEMPLATE_VERSION: 26.2.stable
+
+jobs:
+  build:
+    name: Export Linux builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Read application version
+        id: app
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^config\/version="\(.*\)"$/\1/p' project.godot | head -n1)"
+          if [ -z "$VERSION" ]; then
+            echo "Could not read config/version from project.godot" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building Kainat System Settings $VERSION"
+
+      - name: Install build tools and runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            unzip zip \
+            libfontconfig1 libfreetype6 libx11-6 libxcursor1 libxinerama1 \
+            libxi6 libxrandr2 libgl1 libasound2t64 libpulse0
+
+      - name: Cache Redot editor
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/redot-ci
+          key: redot-editor-${{ env.REDOT_RELEASE }}-${{ runner.os }}
+
+      - name: Install Redot editor and export templates
+        run: |
+          set -euo pipefail
+          CACHE="$HOME/.cache/redot-ci"
+          TPL_DIR="$HOME/.local/share/redot/export_templates/$REDOT_TEMPLATE_VERSION"
+          BASE="https://github.com/Redot-Engine/redot-engine/releases/download/$REDOT_RELEASE"
+          mkdir -p "$CACHE" "$TPL_DIR"
+
+          if [ ! -x "$CACHE/redot" ]; then
+            echo "Downloading Redot editor $REDOT_RELEASE"
+            curl -fL --retry 3 --retry-delay 5 -o "$CACHE/editor.zip" \
+              "$BASE/Redot_${REDOT_ASSET_VERSION}_linux_x64.zip"
+            rm -rf "$CACHE/editor"
+            unzip -q "$CACHE/editor.zip" -d "$CACHE/editor"
+            BIN="$(find "$CACHE/editor" -type f -name '*.x86_64' ! -name '*console*' | head -n1)"
+            test -n "$BIN"
+            mv "$BIN" "$CACHE/redot"
+            chmod +x "$CACHE/redot"
+            rm -rf "$CACHE/editor" "$CACHE/editor.zip"
+          fi
+
+          if [ ! -f "$TPL_DIR/linux_release.x86_64" ]; then
+            echo "Downloading export templates $REDOT_RELEASE"
+            curl -fL --retry 3 --retry-delay 5 -o "$CACHE/templates.tpz" \
+              "$BASE/Redot_${REDOT_ASSET_VERSION}_export_templates.tpz"
+            rm -rf "$CACHE/tpl"
+            unzip -q "$CACHE/templates.tpz" -d "$CACHE/tpl"
+            # The archive either contains a top-level templates/ directory or
+            # the template files themselves; handle both layouts.
+            if [ -d "$CACHE/tpl/templates" ]; then
+              cp -a "$CACHE/tpl/templates/." "$TPL_DIR/"
+            else
+              cp -a "$CACHE/tpl/." "$TPL_DIR/"
+            fi
+            rm -rf "$CACHE/tpl" "$CACHE/templates.tpz"
+          fi
+
+          "$CACHE/redot" --version
+
+      - name: Verify every panel script compiles
+        run: |
+          set -euo pipefail
+          REDOT="$HOME/.cache/redot-ci/redot"
+          mkdir -p scratch
+          cat > scratch/smoke.gd <<'SMOKE'
+          extends SceneTree
+
+          var _frame := 0
+          var _built := 0
+
+          func _initialize() -> void:
+          	process_frame.connect(_tick)
+          	var dir := DirAccess.open("res://panels")
+          	for f in dir.get_files():
+          		if not f.ends_with(".gd") or f in ["settings_panel.gd", "kainat_shell.gd"]:
+          			continue
+          		var node = load("res://panels/" + f).new()
+          		root.add_child(node)
+          		_built += 1
+          	print("SMOKE built=", _built)
+
+          func _tick() -> void:
+          	_frame += 1
+          	if _frame >= 40:
+          		print("SMOKE DONE")
+          		quit()
+          SMOKE
+          timeout 180 "$REDOT" --headless --path . --script res://scratch/smoke.gd \
+            2>&1 | tee /tmp/smoke.log
+          rm -f scratch/smoke.gd
+          grep -q "SMOKE built=" /tmp/smoke.log
+          if grep -qE "SCRIPT ERROR|Parse Error" /tmp/smoke.log; then
+            echo "Panel scripts failed to compile" >&2
+            exit 1
+          fi
+
+      - name: Export release and developer builds
+        run: |
+          set -euo pipefail
+          REDOT="$HOME/.cache/redot-ci/redot"
+          VERSION="${{ steps.app.outputs.version }}"
+          mkdir -p build
+          echo "Exporting release build"
+          "$REDOT" --headless --path . --export-release "Linux" \
+            "build/kainat-system-settings-${VERSION}-linux.x86_64"
+          echo "Exporting developer build"
+          "$REDOT" --headless --path . --export-debug "Linux" \
+            "build/kainat-system-settings-${VERSION}-dev.x86_64"
+          chmod +x build/*.x86_64
+          ls -lh build
+
+      - name: Package and checksum the builds
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.app.outputs.version }}"
+          mkdir -p build/.stage
+
+          make_bundle() { # $1 = binary, $2 = bundle name, $3 = description
+            local stage="build/.stage/$2"
+            mkdir -p "$stage"
+            cp "$1" "$stage/"
+            cat > "$stage/README.txt" <<EOF
+          Kainat System Settings $VERSION — $3
+
+          How to run
+          1. Make the file executable:  chmod +x $(basename "$1")
+          2. Run it by double-clicking, or:  ./$(basename "$1")
+
+          This is a self-contained Linux x86_64 build. It talks to the system
+          through the usual desktop tools (pkexec, NetworkManager, systemd,
+          KDE Plasma) and needs no terminal.
+          EOF
+            ( cd "$stage" && zip -q -r "../../$2.zip" . )
+          }
+
+          make_bundle "build/kainat-system-settings-${VERSION}-linux.x86_64" \
+            "kainat-system-settings-${VERSION}-linux-x86_64" "release build"
+          make_bundle "build/kainat-system-settings-${VERSION}-dev.x86_64" \
+            "kainat-system-settings-${VERSION}-dev-x86_64" "developer build"
+
+          rm -rf build/.stage
+          ( cd build && sha256sum ./*.x86_64 ./*.zip > SHA256SUMS.txt )
+          cat build/SHA256SUMS.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kainat-system-settings-linux-${{ steps.app.outputs.version }}
+          path: |
+            build/*.x86_64
+            build/*.zip
+            build/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
+          VERSION: ${{ steps.app.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd build
+          TITLE="Kainat System Settings $VERSION"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG exists — uploading/replacing assets"
+            gh release upload "$RELEASE_TAG" ./*.zip ./*.x86_64 SHA256SUMS.txt --clobber
+          else
+            echo "Creating release $RELEASE_TAG"
+            gh release create "$RELEASE_TAG" \
+              --title "$TITLE" \
+              --target "$GITHUB_SHA" \
+              --generate-notes \
+              ./*.zip ./*.x86_64 SHA256SUMS.txt
+          fi

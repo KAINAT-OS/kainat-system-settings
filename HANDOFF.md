@@ -3,7 +3,7 @@
 **Audience:** anyone (human or agent) working on another part of Kainat OS who needs to
 understand, modify, package or integrate this app.
 
-**Status:** feature-complete for its current scope, tagged **v1.4.0**, branch `master`,
+**Status:** feature-complete for its current scope, tagged **v1.4.1**, branch `master`,
 clean working tree.
 
 | | |
@@ -14,7 +14,7 @@ clean working tree.
 | Binary used for testing | `/media/kainatq/GAMES_AND_OTHERS/godot/redot/redot.linuxbsd.editor.x86_64` (also recorded in `redotpath.txt`) |
 | Entry scene | `res://main-panel.tscn` |
 | Target OS | Debian-based Kainat OS, KDE Plasma desktop |
-| Tags | `v1.1.0`, `v1.2.0`, `v1.3.0`, `v1.4.0` |
+| Tags | `v1.1.0`, `v1.2.0`, `v1.3.0`, `v1.4.0`, `v1.4.1` |
 | Rollback branch | `baseline-before-overhaul` (state before the GUI overhaul) |
 
 ---
@@ -429,12 +429,84 @@ grep -rn "popup() == OK\|OS.get_unix_time\|is_valid_number\|DirAccess.get_direct
 
 ---
 
-## 10. Known limits and next steps
+## 10. Building and releasing
 
-1. **Not packaged.** There is no `export_presets.cfg`, `.desktop` file or Debian
-   packaging in this repo. Whoever builds the Kainat OS image must export the project
-   with the Redot runtime and install a launcher. `redotpath.txt` names the editor
-   binary used during development.
+`export_presets.cfg` (committed) defines one Linux preset, **“Linux”**, exporting
+x86_64 with the PCK embedded in the executable — a single self-contained file.
+
+Two builds are produced from the same preset:
+
+| Build | Command | Purpose |
+|---|---|---|
+| release | `--export-release "Linux" …` | what users run |
+| dev | `--export-debug "Linux" …` | diagnostics, also used for quick manual testing |
+
+### 10.1 `script_export_mode=0` is load-bearing
+
+By default the exporter converts every `.gd` into a compiled `.gdc` plus a `.gd.remap`.
+That breaks this app in two ways, both silent until you run the exported binary:
+
+* `menu_buttons.gd` decides whether a panel exists with
+  `FileAccess.file_exists("res://panels/<name>.gd")` — false once the script is
+  remapped, so every navigation logs `PANEL LOAD FAILURE` and the window stays empty.
+* `search_manager.gd` builds its index by **reading the panel source text** — with
+  remapped scripts there is no source to read and search returns nothing.
+
+`script_export_mode=0` keeps scripts as plain text in the PCK, so both mechanisms work.
+Verify after changing export settings by running the exported binary:
+
+```bash
+./kainat-system-settings-<version>-linux.x86_64 --headless --quit-after 40
+# must not print "PANEL LOAD FAILURE"; the search index should be non-empty
+```
+
+The preset also excludes `scratch/*`, `addons/*` (editor-only CSS theme plugin) and
+`menu_buttons-back.gd`.
+
+### 10.2 GitHub Actions
+
+`.github/workflows/build.yml` runs on **tag pushes** (`v*`) and on manual dispatch:
+
+1. reads the version from `project.godot`;
+2. downloads the Redot **26.2** editor and its export templates (cached between runs);
+3. loads every panel script in headless mode and fails the build on any parse error;
+4. exports the release and developer binaries;
+5. zips each binary with a short `README.txt` and writes `SHA256SUMS.txt`;
+6. uploads them as workflow artifacts;
+7. on a tag (or a manual run with a release tag) creates the GitHub Release and attaches
+   the binaries, zips and checksums. Re-running updates the assets.
+
+### 10.3 Cutting a release
+
+```bash
+# 1. bump the version (own commit, as always)
+sed -i 's|config/version="1.4.1"|config/version="1.5.0"|' project.godot
+git commit -am "chore: Set application version 1.5.0"
+
+# 2. push the branch …
+git push origin master
+
+# 3. … then the tag; the workflow builds and publishes the release
+git tag -a v1.5.0 -m "Kainat System Settings 1.5.0: <highlights>"
+git push origin v1.5.0
+
+# watch it
+gh run list --repo KAINAT-OS/kainat-system-settings --limit 3
+```
+
+To rebuild an existing release without changing code, run the workflow manually with
+its `release_tag` input set to the existing tag (assets are replaced).
+
+---
+
+## 11. Known limits and next steps
+
+1. **Desktop integration is still missing.** The workflow produces a runnable binary and
+   a GitHub Release, but there is no `.desktop` file, icon installation or Debian
+   package in this repo. Image builders should install a launcher pointing at the
+   extracted binary (suggested: `Exec=/opt/kainat-system-settings/kainat-system-settings`,
+   `Categories=Settings;`). `redotpath.txt` names the editor binary used during
+   development.
 2. **Untested branches on the dev machine** (no hardware/config to exercise them):
    ufw not installed, no Samba server, no printers, no Bluetooth devices paired
    beyond one, no VPN configs. Those paths are written against the tools' real output
@@ -449,13 +521,11 @@ grep -rn "popup() == OK\|OS.get_unix_time\|is_valid_number\|DirAccess.get_direct
 5. **`hardware.gd`** reads temps from hwmon sysfs (no process spawns) and only falls
    back to `sensors` when sysfs is empty; the live timer also stops when the panel is
    not visible. Keep it that way.
-6. Version bump + tag when landing work:
-   `sed -i 's|config/version="1.4.0"|config/version="1.5.0"|' project.godot` → commit →
-   `git tag -a v1.5.0 -m "…"`.
+6. Release procedure lives in §10.3.
 
 ---
 
-## 11. Expectations on the rest of Kainat OS
+## 12. Expectations on the rest of Kainat OS
 
 This app assumes a **Debian/KDE Plasma** system. If another component changes any of
 these, it must be reflected here (or the corresponding panel will degrade — it will
