@@ -105,6 +105,14 @@ jobs:
 
           "$CACHE/redot" --version
 
+      - name: Import project resources
+        run: |
+          set -euo pipefail
+          # A fresh checkout has no .godot cache, so "extends SettingsPanel"
+          # is unresolved until the engine scans the project. --import also
+          # generates global_script_class_cache.cfg.
+          "$HOME/.cache/redot-ci/redot" --headless --path . --import
+
       - name: Verify every panel script compiles
         run: |
           set -euo pipefail
