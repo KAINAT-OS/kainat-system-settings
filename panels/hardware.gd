@@ -228,11 +228,13 @@ func _disk_summary() -> String:
 
 # --- temperatures ----------------------------------------------------------
 
-# Native sensor read-out as [{chip, sensor, celsius}]. Prefers `sensors`
-# (lm-sensors gives readable chip/label names) and falls back to the raw
-# millidegree files under /sys so the tile still works without it.
+# Native sensor read-out as [{chip, sensor, celsius}]. Reads the hwmon sysfs
+# files first (no process spawn, so the 3 s live refresh stays cheap) and only
+# falls back to `sensors` when sysfs exposes nothing.
 func _temperature_readings() -> Array:
-	var out: Array = []
+	var out: Array = _sys_temps()
+	if not out.is_empty():
+		return out
 	if Sh.has_tool("sensors"):
 		var chip := ""
 		for line in Sh.run_lines("sensors 2>/dev/null"):
@@ -257,8 +259,6 @@ func _temperature_readings() -> Array:
 			if c <= -100.0 or c >= 200.0:
 				continue
 			out.append({"chip": chip, "sensor": sensor, "celsius": c})
-	if out.is_empty():
-		out = _sys_temps()
 	return out
 
 
