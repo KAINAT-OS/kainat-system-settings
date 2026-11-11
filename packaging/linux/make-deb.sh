@@ -24,7 +24,7 @@ VERSION=$2
 OUT=${3:-dist}
 
 [ -f "$BIN" ] || { echo "error: binary not found: $BIN" >&2; exit 1; }
-[ -x "$BIN" ] || { echo "error: binary is not executable: $BIN" >&2; exit 1; }
+[ -r "$BIN" ] || { echo "error: binary is not readable: $BIN" >&2; exit 1; }
 command -v dpkg-deb >/dev/null || { echo "error: dpkg-deb is required" >&2; exit 1; }
 
 PKG=kainat-system-settings

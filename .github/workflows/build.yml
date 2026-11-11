@@ -240,6 +240,10 @@ jobs:
           name: linux-binaries
           path: binaries
 
+      - name: Restore executable bit
+        # upload-artifact stores a zip and does not keep file modes.
+        run: chmod +x binaries/*.x86_64
+
       - name: Build .deb
         run: |
           set -euo pipefail
@@ -287,6 +291,10 @@ jobs:
         with:
           name: linux-binaries
           path: binaries
+
+      - name: Restore executable bit
+        # upload-artifact stores a zip and does not keep file modes.
+        run: chmod +x binaries/*.x86_64
 
       - name: Cache appimagetool
         uses: actions/cache@v4
