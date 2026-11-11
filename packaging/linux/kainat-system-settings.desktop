@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Kainat System Settings
+GenericName=System Settings
+Comment=Configure every part of your Kainat OS system without a terminal
+Exec=kainat-system-settings
+TryExec=kainat-system-settings
+Icon=kainat-system-settings
+Terminal=false
+StartupNotify=true
+Categories=Settings;System;
+Keywords=settings;control;panel;system;configuration;admin;network;display;sound;

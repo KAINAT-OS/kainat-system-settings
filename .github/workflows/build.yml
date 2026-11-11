@@ -1,13 +1,16 @@
 name: Build Linux release
 
-# Builds the Linux x86_64 export of Kainat System Settings twice — a normal
-# (release) build and a developer build — and publishes a GitHub Release with
-# both binaries.
+# Produces every Linux artefact for Kainat System Settings and, on a version
+# tag, publishes them as a GitHub Release:
 #
-#   * Push a tag like `v1.4.1`  -> build + publish a release for that tag.
-#   * Run the workflow manually -> build; supply a tag to also publish.
+#   build     -> release binary + developer binary + zips      (linux-binaries)
+#   deb       -> Debian package for Kainat OS / Debian / Ubuntu (debian-package)
+#   appimage  -> portable single-file AppImage                  (appimage)
+#   release   -> checksums + GitHub Release with all artefacts
 #
-# The engine (Redot) and its export templates are the only external inputs.
+#   * Push a tag like `v1.4.2`  -> build everything and publish the release.
+#   * Run the workflow manually -> build everything; supply a tag to also
+#                                  publish (or just take the artifacts).
 
 on:
   push:
@@ -31,10 +34,15 @@ env:
   REDOT_TEMPLATE_VERSION: 26.2.stable
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Export the engine binaries
+  # ---------------------------------------------------------------------------
   build:
     name: Export Linux builds
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      version: ${{ steps.app.outputs.version }}
 
     steps:
       - name: Check out the repository
@@ -206,31 +214,157 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: kainat-system-settings-linux-${{ steps.app.outputs.version }}
+          name: linux-binaries
           path: |
             build/*.x86_64
             build/*.zip
             build/SHA256SUMS.txt
           if-no-files-found: error
 
-      - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
-          VERSION: ${{ steps.app.outputs.version }}
+  # ---------------------------------------------------------------------------
+  # 2. Debian package (Kainat OS, Debian, Ubuntu)
+  # ---------------------------------------------------------------------------
+  deb:
+    name: Build Debian package
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Download exported binary
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-binaries
+          path: binaries
+
+      - name: Build .deb
         run: |
           set -euo pipefail
-          cd build
+          VERSION="${{ needs.build.outputs.version }}"
+          BIN="binaries/kainat-system-settings-${VERSION}-linux.x86_64"
+          packaging/linux/make-deb.sh "$BIN" "$VERSION" dist
+          dpkg-deb --info dist/*.deb
+          dpkg-deb --contents dist/*.deb
+
+      - name: Verify package metadata and payload
+        run: |
+          set -euo pipefail
+          DEB=$(ls dist/*.deb)
+          test -n "$(dpkg-deb -f "$DEB" Depends)"
+          dpkg-deb -x "$DEB" verify
+          verify/usr/bin/kainat-system-settings --headless --quit-after 40 \
+            2>&1 | tee /tmp/deb-run.log
+          if grep -qE "PANEL LOAD FAILURE|SCRIPT ERROR|Parse Error" /tmp/deb-run.log; then
+            echo "Installed payload fails to boot" >&2
+            exit 1
+          fi
+
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-package
+          path: dist/*.deb
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # 3. Portable AppImage
+  # ---------------------------------------------------------------------------
+  appimage:
+    name: Build AppImage
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Download exported binary
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-binaries
+          path: binaries
+
+      - name: Cache appimagetool
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/kainat-appimage
+          key: appimagetool-continuous-${{ runner.os }}
+
+      - name: Build AppImage
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.build.outputs.version }}"
+          BIN="binaries/kainat-system-settings-${VERSION}-linux.x86_64"
+          packaging/linux/make-appimage.sh "$BIN" "$VERSION" dist
+          ls -lh dist
+
+      - name: Verify AppImage boots
+        run: |
+          set -euo pipefail
+          IMAGE=$(ls dist/*.AppImage)
+          chmod +x "$IMAGE"
+          timeout 90 "$IMAGE" --appimage-extract-and-run --headless --quit-after 40 \
+            2>&1 | tee /tmp/appimage-run.log
+          if grep -qE "PANEL LOAD FAILURE|SCRIPT ERROR|Parse Error" /tmp/appimage-run.log; then
+            echo "AppImage payload fails to boot" >&2
+            exit 1
+          fi
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: dist/*.AppImage
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # 4. Checksums + GitHub Release
+  # ---------------------------------------------------------------------------
+  release:
+    name: Publish release
+    needs: [build, deb, appimage]
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Write checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          rm -f SHA256SUMS.txt
+          sha256sum ./* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          ls -lh
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd dist
           TITLE="Kainat System Settings $VERSION"
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "Release $RELEASE_TAG exists — uploading/replacing assets"
-            gh release upload "$RELEASE_TAG" ./*.zip ./*.x86_64 SHA256SUMS.txt --clobber
+            echo "Release $RELEASE_TAG exists — replacing assets"
+            gh release upload "$RELEASE_TAG" ./* --clobber
           else
             echo "Creating release $RELEASE_TAG"
             gh release create "$RELEASE_TAG" \
               --title "$TITLE" \
               --target "$GITHUB_SHA" \
               --generate-notes \
-              ./*.zip ./*.x86_64 SHA256SUMS.txt
+              ./*
           fi
