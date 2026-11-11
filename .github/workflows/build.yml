@@ -54,11 +54,16 @@ jobs:
 
       - name: Install build tools and runtime libraries
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          set -euo pipefail
+          # Only what a headless Redot import/export needs. Audio libraries are
+          # deliberately left out: they are not used by the exporter and pull a
+          # large dependency tree (which makes the step more fragile).
+          APT=(sudo apt-get -o Acquire::Retries=5)
+          "${APT[@]}" update
+          "${APT[@]}" install -y --no-install-recommends \
             unzip zip \
             libfontconfig1 libfreetype6 libx11-6 libxcursor1 libxinerama1 \
-            libxi6 libxrandr2 libgl1 libasound2t64 libpulse0
+            libxi6 libxrandr2 libgl1
 
       - name: Cache Redot editor
         uses: actions/cache@v4
