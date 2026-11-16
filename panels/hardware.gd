@@ -16,7 +16,7 @@ func _populate() -> void:
 	var mem_total: String = _mem_total()
 	var mem_used: String = _mem_used()
 	var gpu: String = _gpu()
-	var kernel: String = OS.get_version()
+	var kernel: String = _kernel_release()
 	var os_name: String = str(Sh.os_release().get("PRETTY_NAME", "Kainat OS"))
 	var temps: Array = _temperature_readings()
 	var cpu_c: float = _cpu_celsius(temps)
@@ -180,6 +180,15 @@ func _cpu_model() -> String:
 			if parts.size() > 1:
 				return parts[1].strip_edges()
 	return "Unknown processor"
+
+
+# OS.get_version() is the distribution version string ("LTS 25.1"), not the
+# kernel, so the release is read straight from procfs.
+func _kernel_release() -> String:
+	var release := Sh.read_text("/proc/sys/kernel/osrelease").strip_edges()
+	if release.is_empty():
+		release = Sh.run_capture("uname -r 2>/dev/null").strip_edges()
+	return release if not release.is_empty() else UNAVAILABLE
 
 
 func _mem_total() -> String:

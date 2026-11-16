@@ -109,15 +109,15 @@ func _schedule_text(conf: Dictionary) -> String:
 		return "Unknown"
 	var parts: Array[String] = []
 	if str(conf.get("schedule_hourly", "false")) == "true":
-		parts.append("hourly")
+		parts.append("Hourly")
 	if str(conf.get("schedule_daily", "false")) == "true":
-		parts.append("daily")
+		parts.append("Daily")
 	if str(conf.get("schedule_weekly", "false")) == "true":
-		parts.append("weekly")
+		parts.append("Weekly")
 	if str(conf.get("schedule_monthly", "false")) == "true":
-		parts.append("monthly")
+		parts.append("Monthly")
 	if str(conf.get("schedule_boot", "false")) == "true":
-		parts.append("at every boot")
+		parts.append("At every boot")
 	if parts.is_empty():
 		return "Off (manual snapshots only)"
 	return ", ".join(parts)

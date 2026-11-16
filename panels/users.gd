@@ -53,19 +53,21 @@ func _open_wallet() -> void:
 func _populate() -> void:
 	var user: String = Sh.run_capture("whoami").strip_edges()
 	var full_name: String = _full_name(user)
-	var groups: String = Sh.run_capture("id -nG " + Sh.quote(user)).strip_edges()
+	# id -nG answers with the group names space-separated on a single line; the
+	# row joins them with commas so they do not read as one long sentence.
+	var group_names := Sh.run_capture("id -nG " + Sh.quote(user)).strip_edges().split(" ", false)
 
 	info_tiles([
 		{"value": full_name if not full_name.is_empty() else user, "label": "Current user"},
 		{"value": user, "label": "Username"},
-		{"value": str(groups.split(" ").size()), "label": "Groups"},
+		{"value": str(group_names.size()), "label": "Groups"},
 	])
 
 	info_row(_account_card, "Full name", full_name if not full_name.is_empty() else user)
 	info_row(_account_card, "Username", user)
 	info_row(_account_card, "Home", Sh.home())
 	# The Groups placeholder is updated in place.
-	set_info_value(_groups_row, groups)
+	set_info_value(_groups_row, UNAVAILABLE if group_names.is_empty() else ", ".join(group_names))
 
 
 func _full_name(username: String) -> String:

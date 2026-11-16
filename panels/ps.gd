@@ -49,19 +49,29 @@ func _populate_profile() -> void:
 	if Sh.has_tool("powerprofilesctl"):
 		var profiles: Array = []
 		for line in Sh.run_lines("powerprofilesctl list 2>/dev/null"):
-			if line.ends_with(":"):
-				profiles.append(line.trim_suffix(":").strip_edges())
+			# The active profile is marked with a leading asterisk ("* balanced:"),
+			# which is not part of the name: keeping it made the dropdown show
+			# "* balanced" and left nothing selected, because find() on the plain
+			# name from `powerprofilesctl get` never matched it.
+			var name := line.strip_edges().trim_prefix("*").strip_edges()
+			if name.ends_with(":"):
+				profiles.append(name.trim_suffix(":").strip_edges())
 		if profiles.is_empty():
 			profiles = ["power-saver", "balanced", "performance"]
 		var current: String = Sh.run_capture("powerprofilesctl get 2>/dev/null").strip_edges()
+		# The ids are D-Bus values ("power-saver"); the dropdown and the
+		# confirmation name the profile the way the daemon's own switcher does.
+		var labels: Array = []
+		for profile in profiles:
+			labels.append(_profile_label(str(profile)))
 		var selected: int = profiles.find(current)
-		choice_row(c, "Profile", "Balance performance and battery life.", "P", profiles,
+		choice_row(c, "Profile", "Balance performance and battery life.", "P", labels,
 			selected, func(index: int) -> void:
 				var profile: String = str(profiles[index])
 				if Sh.run_wait("powerprofilesctl set " + Sh.quote(profile)) == 0:
-					notify("Power profile: " + profile)
+					notify("Power profile: " + str(labels[index]))
 				else:
-					notify("Could not switch to the " + profile + " profile."))
+					notify("Could not switch to the " + str(labels[index]).to_lower() + " profile."))
 	else:
 		unavailable_row(c, "Power Profiles", "power-profiles-daemon is not installed")
 
@@ -71,7 +81,12 @@ func _populate_cpu() -> void:
 	var governors: Array = _governors()
 	if not governors.is_empty():
 		var current_gov: String = Sh.run_capture("cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null").strip_edges()
-		choice_row(c2, "CPU Governor", "Scaling strategy for the processor.", "C", governors,
+		# Governor names are kernel ids; the written value stays the id, only the
+		# label and the confirmation are spelled out.
+		var labels: Array = []
+		for governor in governors:
+			labels.append(_governor_label(str(governor)))
+		choice_row(c2, "CPU Governor", "Scaling strategy for the processor.", "C", labels,
 			governors.find(current_gov), func(index: int) -> void:
 				var mode: String = str(governors[index])
 				# The governor name is written inside a pkexec shell command, so
@@ -80,9 +95,9 @@ func _populate_cpu() -> void:
 					"printf '%s' " + Sh.quote(mode)
 					+ " | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null"))
 				if code == 0:
-					notify("CPU governor: " + mode)
+					notify("CPU governor: " + str(labels[index]))
 				else:
-					notify("Could not set the CPU governor to " + mode + "."))
+					notify("Could not set the CPU governor to " + str(labels[index]).to_lower() + "."))
 	else:
 		unavailable_row(c2, "CPU Governor", "The kernel does not expose cpufreq")
 	info_row(c2, "Battery", _battery())
@@ -127,6 +142,38 @@ func _populate_lid() -> void:
 			_set_inhibit_lid_external(not on)
 			notify("Lid action with external monitor " + ("enabled" if on else "disabled")))
 	info_row(c, "Lid", "Detected" if _lid_present() else "Not detected")
+
+
+# power-profiles-daemon speaks in ids ("power-saver", "balanced") that its own
+# switcher presents as names; the ids stay the value that gets written.
+func _profile_label(profile: String) -> String:
+	match profile:
+		"power-saver":
+			return "Power Saver"
+		"balanced":
+			return "Balanced"
+		"performance":
+			return "Performance"
+	return profile.capitalize()
+
+
+# Kernel governors are one jargon word each; these are the same names with the
+# spacing a reader expects. Anything new from a newer kernel is capitalised.
+func _governor_label(governor: String) -> String:
+	match governor:
+		"performance":
+			return "Performance"
+		"powersave":
+			return "Power Save"
+		"ondemand":
+			return "On Demand"
+		"conservative":
+			return "Conservative"
+		"schedutil":
+			return "Schedutil"
+		"userspace":
+			return "Userspace"
+	return governor.capitalize()
 
 
 func _governors() -> Array:

@@ -228,6 +228,8 @@ func section(title: String) -> void:
 	label.text = title
 	label.add_theme_font_size_override("font_size", 15)
 	label.add_theme_color_override("font_color", _accent())
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_trim_label(label)
 	row.add_child(label)
 
 
@@ -264,6 +266,37 @@ func _trim_label(label: Label, full_text: String = "") -> Label:
 	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	label.tooltip_text = label.text if full_text.is_empty() else full_text
 	return label
+
+
+# --- ini files --------------------------------------------------------------
+
+# Reads one key out of a .desktop / .theme / .colors file. Theme packages keep
+# the name the desktop shows in their metadata rather than in their directory
+# name, so the pickers need this to stop showing package ids.
+# Matching is exact on the key: these files carry localized siblings such as
+# "Name[ar]=" that a prefix match would return instead of the real value.
+func ini_value(path: String, section: String, key: String) -> String:
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return ""
+	var wanted := "[" + section + "]"
+	var inside := false
+	while not file.eof_reached():
+		var line := file.get_line().strip_edges()
+		if line.is_empty() or line.begins_with("#") or line.begins_with(";"):
+			continue
+		if line.begins_with("["):
+			inside = line == wanted
+			continue
+		if not inside:
+			continue
+		var sep := line.find("=")
+		if sep <= 0:
+			continue
+		if line.substr(0, sep).strip_edges() != key:
+			continue
+		return line.substr(sep + 1).strip_edges()
+	return ""
 
 
 func _leading(glyph: String, icon_path: String = "") -> Control:

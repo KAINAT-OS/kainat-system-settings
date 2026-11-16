@@ -712,13 +712,18 @@ func _setup_scrollbars(theme: Theme) -> void:
 	var track: Color = _c(&"base_color").lerp(_c(&"background"), 0.5)
 	var grabber: Color = _c(&"disabled_text_color").lerp(_c(&"base_color"), 0.35)
 	var grabber_hi: Color = _c(&"accent")
+	# A VScrollBar takes its width from the left/right content margins of its
+	# stylebox and an HScrollBar its height from the top/bottom ones. With both
+	# at zero the bar laid itself out 0 px wide and disappeared, leaving pages
+	# that overflow with nothing to drag.
+	const THICK: float = 6.0
 
 	for cls in ["VScrollBar", "HScrollBar"]:
-		theme.set_stylebox("scroll", cls, _flat(track, 4.0, 0.0, Color.TRANSPARENT, 0.0, 0.0))
-		theme.set_stylebox("scroll_focus", cls, _flat(track, 4.0, 0.0, Color.TRANSPARENT, 0.0, 0.0))
-		theme.set_stylebox("grabber", cls, _flat(grabber, 4.0, 0.0, Color.TRANSPARENT, 0.0, 0.0))
-		theme.set_stylebox("grabber_highlight", cls, _flat(grabber_hi, 4.0, 0.0, Color.TRANSPARENT, 0.0, 0.0))
-		theme.set_stylebox("grabber_pressed", cls, _flat(_c(&"accent").lightened(0.1), 4.0, 0.0, Color.TRANSPARENT, 0.0, 0.0))
+		theme.set_stylebox("scroll", cls, _flat(track, 4.0, 0.0, Color.TRANSPARENT, THICK, THICK))
+		theme.set_stylebox("scroll_focus", cls, _flat(track, 4.0, 0.0, Color.TRANSPARENT, THICK, THICK))
+		theme.set_stylebox("grabber", cls, _flat(grabber, 4.0, 0.0, Color.TRANSPARENT, THICK, THICK))
+		theme.set_stylebox("grabber_highlight", cls, _flat(grabber_hi, 4.0, 0.0, Color.TRANSPARENT, THICK, THICK))
+		theme.set_stylebox("grabber_pressed", cls, _flat(_c(&"accent").lightened(0.1), 4.0, 0.0, Color.TRANSPARENT, THICK, THICK))
 
 
 func _setup_sliders(theme: Theme) -> void:
@@ -731,9 +736,11 @@ func _setup_sliders(theme: Theme) -> void:
 	var grabber_dis_tex: ImageTexture = _make_circle_texture(16, _c(&"disabled_text_color"))
 
 	for cls in ["HSlider", "VSlider"]:
-		theme.set_stylebox("slider", cls, _flat(track, radius, 0.0, Color.TRANSPARENT, 0.0, 0.0))
-		theme.set_stylebox("grabber_area", cls, _flat(filled, radius, 0.0, Color.TRANSPARENT, 0.0, 0.0))
-		theme.set_stylebox("grabber_area_highlight", cls, _flat(filled.lightened(0.1), radius, 0.0, Color.TRANSPARENT, 0.0, 0.0))
+		# Same story as the scrollbars: the track is as thick as the stylebox's
+		# vertical margins, so a 0 margin drew an invisible rail under the knob.
+		theme.set_stylebox("slider", cls, _flat(track, radius, 0.0, Color.TRANSPARENT, 3.0, 3.0))
+		theme.set_stylebox("grabber_area", cls, _flat(filled, radius, 0.0, Color.TRANSPARENT, 3.0, 3.0))
+		theme.set_stylebox("grabber_area_highlight", cls, _flat(filled.lightened(0.1), radius, 0.0, Color.TRANSPARENT, 3.0, 3.0))
 		theme.set_icon("grabber", cls, grabber_tex)
 		theme.set_icon("grabber_highlight", cls, grabber_hi_tex)
 		theme.set_icon("grabber_disabled", cls, grabber_dis_tex)

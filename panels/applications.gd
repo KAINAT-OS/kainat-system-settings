@@ -50,7 +50,31 @@ func _build_static() -> void:
 
 func _default_handler(command: String) -> String:
 	var out: String = Sh.run_capture(command + " 2>/dev/null").strip_edges()
-	return out if not out.is_empty() else UNAVAILABLE
+	return _desktop_app_name(out) if not out.is_empty() else UNAVAILABLE
+
+
+# xdg-setting/xdg-mime answer with a desktop-entry id ("org.kde.dolphin.desktop"),
+# which is a file name inside /usr/share/applications and means nothing on
+# screen. Look up the Name the application menu shows for the same file and fall
+# back to the id without its suffix when no entry is found (uninstalled
+# handler, or a user entry in a path this list does not cover).
+func _desktop_app_name(id: String) -> String:
+	var file := id if id.ends_with(".desktop") else id + ".desktop"
+	var bases: Array[String] = [
+		"/usr/share/applications",
+		"/usr/local/share/applications",
+		"/var/lib/flatpak/exports/share/applications",
+		Sh.home() + "/.local/share/applications",
+		Sh.home() + "/.local/share/flatpak/exports/share/applications",
+	]
+	for base in bases:
+		var path: String = base.path_join(file)
+		if not FileAccess.file_exists(path):
+			continue
+		var name := ini_value(path, "Desktop Entry", "Name")
+		if not name.is_empty():
+			return name
+	return id.trim_suffix(".desktop")
 
 
 func _populate_defaults() -> void:

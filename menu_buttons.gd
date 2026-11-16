@@ -3,6 +3,13 @@ extends VBoxContainer
 const Sh := preload("res://panels/kainat_shell.gd")
 const FAV_GROUP := "favorites_ui"
 
+# Below this the router — which has no horizontal scrolling — lets the widest
+# page rows run past the right edge, where nothing can reach them. Measured on
+# the widest pages (Update, Printers) with the 280 px sidebar and the 12 px
+# scroll bar taken out of the window width. Godot has no minimum-size project
+# setting, so the floor is applied to the window itself.
+const MIN_WINDOW := Vector2i(1000, 600)
+
 # Sidebar layout. Buttons are regrouped under these headings in this order;
 # any button not listed here lands in a trailing "More" section so a new panel
 # never disappears from the sidebar.
@@ -48,6 +55,12 @@ var _fav_nodes: Array[Node] = []
 func _ready() -> void:
 	# Stars anywhere in the app call refresh_favorites() through this group.
 	add_to_group(FAV_GROUP)
+
+	# Applied before the first panel is routed, so no page is ever laid out at a
+	# width where its rows fall off the right edge.
+	var window := get_window()
+	if window != null:
+		window.min_size = MIN_WINDOW
 
 	# Threat Mitigation: Validate critical dependencies early
 	if not router:

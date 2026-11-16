@@ -4,3 +4,6 @@
 
 # Export output
 /build/
+
+# Local scratch space: screenshots, exported probes, throwaway files
+scratch/*

@@ -14,53 +14,59 @@ func build() -> void:
 	section("Appearance")
 	var c := card()
 	_choice_row_dirs(c, "Global Theme", "Complete look and feel presets.", "G",
-		_list_dirs(["/usr/share/plasma/look-and-feel", Sh.home() + "/.local/share/plasma/look-and-feel"]),
+		_theme_choices(["/usr/share/plasma/look-and-feel", Sh.home() + "/.local/share/plasma/look-and-feel"], "package"),
 		_current_kde("KDE", "LookAndFeelPackage"),
-		func(name: String) -> void:
+		func(name: String, label: String) -> void:
+			# Only the live tool touches every part of the theme. The config key
+			# is what Plasma reads at sign-in, so the fallback has to say so
+			# instead of claiming the new look is already on screen.
 			if Sh.has_tool("plasma-apply-lookandfeel"):
-				Sh.run("plasma-apply-lookandfeel -a " + Sh.quote(name))
-			else:
-				Sh.kde_write("kdeglobals", "KDE", "LookAndFeelPackage", name)
-			notify("Global theme: " + name))
+				if Sh.run_wait("plasma-apply-lookandfeel -a " + Sh.quote(name) + " >/dev/null 2>&1") == 0:
+					notify("Global theme: " + label)
+				else:
+					notify("Could not apply the global theme " + label + ".")
+				return
+			Sh.kde_write("kdeglobals", "KDE", "LookAndFeelPackage", name)
+			notify("Global theme saved. Sign in again to apply it."))
 	kcm_row(c, "Global Theme (advanced)", "Browse and preview theme packages.", "G", "kcm_lookandfeel")
 
 	_choice_row_dirs(c, "Color Scheme", "Window and accent colors.", "C",
-		_list_files(["/usr/share/color-schemes", Sh.home() + "/.local/share/color-schemes"], ".colors"),
+		_theme_choices(["/usr/share/color-schemes", Sh.home() + "/.local/share/color-schemes"], "scheme"),
 		Sh.kde_read("kdeglobals", "General", "ColorScheme"),
-		func(name: String) -> void:
+		func(name: String, label: String) -> void:
 			if Sh.has_tool("plasma-apply-colorscheme"):
 				Sh.run("plasma-apply-colorscheme " + Sh.quote(name))
 			else:
 				Sh.kde_write("kdeglobals", "General", "ColorScheme", name)
-			notify("Color scheme: " + name))
+			notify("Color scheme: " + label))
 
 	_choice_row_dirs(c, "Plasma Style", "Widget and panel style.", "P",
-		_list_dirs(["/usr/share/plasma/desktoptheme", Sh.home() + "/.local/share/plasma/desktoptheme"]),
+		_theme_choices(["/usr/share/plasma/desktoptheme", Sh.home() + "/.local/share/plasma/desktoptheme"], "package"),
 		Sh.kde_read("plasmarc", "Theme", "name", "Breeze"),
-		func(name: String) -> void:
+		func(name: String, label: String) -> void:
 			if Sh.has_tool("plasma-apply-desktoptheme"):
 				Sh.run("plasma-apply-desktoptheme " + Sh.quote(name))
 			else:
 				Sh.kde_write("plasmarc", "Theme", "name", name)
-			notify("Plasma style: " + name))
+			notify("Plasma style: " + label))
 
 	_choice_row_dirs(c, "Icons", "Icon theme for apps and the desktop.", "I",
-		_list_dirs(["/usr/share/icons", Sh.home() + "/.local/share/icons"], "index.theme"),
+		_theme_choices(["/usr/share/icons", Sh.home() + "/.local/share/icons"], "icons"),
 		Sh.kde_read("kdeglobals", "Icons", "Theme"),
-		func(name: String) -> void:
+		func(name: String, label: String) -> void:
 			Sh.kde_write("kdeglobals", "Icons", "Theme", name)
 			Sh.run("kbuildsycoca6 >/dev/null 2>&1 &")
-			notify("Icon theme: " + name))
+			notify("Icon theme: " + label))
 
 	_choice_row_dirs(c, "Cursor Theme", "Mouse pointer style.", "R",
-		_list_dirs(["/usr/share/icons", Sh.home() + "/.local/share/icons"], "cursors"),
+		_theme_choices(["/usr/share/icons", Sh.home() + "/.local/share/icons"], "cursors"),
 		Sh.kde_read("kcminputrc", "Mouse", "cursorTheme"),
-		func(name: String) -> void:
+		func(name: String, label: String) -> void:
 			if Sh.has_tool("plasma-apply-cursortheme"):
 				Sh.run("plasma-apply-cursortheme " + Sh.quote(name))
 			else:
 				Sh.kde_write("kcminputrc", "Mouse", "cursorTheme", name)
-			notify("Cursor theme: " + name))
+			notify("Cursor theme: " + label))
 
 	section("Desktop")
 	var c2 := card()
@@ -175,13 +181,15 @@ func _on_scale_changed(idx: int) -> void:
 
 
 func _choice_row_dirs(card_box: VBoxContainer, title: String, subtitle: String, glyph: String,
-		options: Array, current: String, on_select: Callable) -> void:
-	if options.is_empty():
+		choices: Dictionary, current: String, on_select: Callable) -> void:
+	var ids: Array = choices["ids"]
+	var labels: Array = choices["labels"]
+	if ids.is_empty():
 		unavailable_row(card_box, title, "None found")
 		return
-	var selected: int = options.find(current)
-	choice_row(card_box, title, subtitle, glyph, options, selected, func(index: int) -> void:
-		on_select.call(str(options[index])))
+	var selected: int = ids.find(current)
+	choice_row(card_box, title, subtitle, glyph, labels, selected, func(index: int) -> void:
+		on_select.call(str(ids[index]), str(labels[index])))
 
 
 func _list_files(bases: Array, extension: String) -> Array:
@@ -222,6 +230,84 @@ func _list_dirs(bases: Array, marker: String = "") -> Array:
 			entry = dir.get_next()
 	names.sort()
 	return names
+
+
+# Every picker shows the name the desktop shows: package ids such as
+# "org.kde.breezedark.desktop" are internal, and the same theme can be installed
+# system-wide and per user, so the id is also the only stable handle.
+# kinds: "package" (look-and-feel), "icons", "cursors", "scheme".
+func _theme_choices(bases: Array, kind: String) -> Dictionary:
+	var ids: Array = []
+	match kind:
+		"scheme":
+			ids = _list_files(bases, ".colors")
+		"icons":
+			ids = _list_dirs(bases, "index.theme")
+		"cursors":
+			ids = _list_dirs(bases, "cursors")
+		_:
+			ids = _list_dirs(bases)
+	var labels: Array = []
+	var order: Array = []
+	for i in ids.size():
+		labels.append(_theme_label(_theme_path(bases, str(ids[i]), kind), str(ids[i]), kind))
+		order.append(i)
+	# Sort on what the user reads; ordering by package id looks arbitrary.
+	order.sort_custom(func(a: int, b: int) -> bool:
+		return str(labels[a]).nocasecmp_to(str(labels[b])) < 0)
+	var sorted_ids: Array = []
+	var sorted_labels: Array = []
+	for i in order:
+		sorted_ids.append(ids[i])
+		sorted_labels.append(labels[i])
+	return {"ids": sorted_ids, "labels": sorted_labels}
+
+
+# The path an id was found at, preferring the system copy: the per-user one may
+# be an override of the same name.
+func _theme_path(bases: Array, id: String, kind: String) -> String:
+	var file := id + ".colors" if kind == "scheme" else id
+	for base in bases:
+		var path: String = str(base).path_join(file)
+		if kind == "scheme":
+			if FileAccess.file_exists(path):
+				return path
+		elif DirAccess.dir_exists_absolute(path):
+			return path
+	return ""
+
+
+func _theme_label(path: String, id: String, kind: String) -> String:
+	var name := ""
+	if path.is_empty():
+		name = ""
+	elif kind == "package":
+		name = _kplugin_name(path)
+	elif kind == "scheme":
+		name = ini_value(path, "General", "Name")
+	else:
+		# Icon and cursor themes both carry an [Icon Theme] block.
+		name = ini_value(path.path_join("index.theme"), "Icon Theme", "Name")
+	if name.is_empty():
+		# No metadata to read: drop the packaging suffix rather than show the
+		# directory name the user never sees anywhere else.
+		name = id.trim_suffix(".desktop")
+	return name
+
+
+# Plasma 5.x packages ship metadata.desktop with a plain [Desktop Entry] Name;
+# Plasma 6 packages ship metadata.json with KPlugin.Name. Both are in the wild.
+func _kplugin_name(dir: String) -> String:
+	var json_path := dir.path_join("metadata.json")
+	if FileAccess.file_exists(json_path):
+		var data: Variant = JSON.parse_string(Sh.read_text(json_path))
+		if data is Dictionary:
+			var plugin: Variant = (data as Dictionary).get("KPlugin", {})
+			if plugin is Dictionary:
+				var name := str((plugin as Dictionary).get("Name", "")).strip_edges()
+				if not name.is_empty():
+					return name
+	return ini_value(dir.path_join("metadata.desktop"), "Desktop Entry", "Name")
 
 
 func _current_kde(group: String, key: String) -> String:

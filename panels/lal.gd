@@ -13,8 +13,8 @@ func build() -> void:
 
 	section("Current Locale")
 	var c := card()
-	info_row(c, "Language", _env("LANG", UNAVAILABLE))
-	info_row(c, "Numeric / Time", _env("LC_ALL", _env("LC_TIME", "Default")))
+	info_row(c, "Language", _locale_label(_env("LANG", UNAVAILABLE)))
+	info_row(c, "Numeric / Time", _locale_label(_env("LC_ALL", _env("LC_TIME", "Default"))))
 	info_row(c, "Keyboard Layout", _keyboard_layout())
 	_tz_row = info_row(c, "Timezone", _timezone())
 
@@ -63,14 +63,82 @@ func _env(key: String, fallback: String) -> String:
 
 func _keyboard_layout() -> String:
 	if Sh.has_tool("localectl"):
+		var keymap := ""
 		for line in Sh.run_lines("localectl status 2>/dev/null"):
 			if not line.contains(":"):
 				continue
-			if line.contains("X11 Layout") or line.contains("VC Keymap"):
-				var value := line.split(":", true, 1)[1].strip_edges()
-				if not value.is_empty():
-					return value
+			var value := line.split(":", true, 1)[1].strip_edges()
+			# "(unset)" is localectl saying the field has no value, not the name
+			# of a layout: returning it made the row claim a layout that does
+			# not exist.
+			if value.is_empty() or value.begins_with("("):
+				continue
+			# The X11 layout is what the session uses. The virtual console keymap
+			# is the fallback for a machine that never sorts a GUI session and
+			# is read second because localectl prints it first.
+			if line.contains("X11 Layout"):
+				return value
+			if line.contains("VC Keymap") and keymap.is_empty():
+				keymap = value
+		if not keymap.is_empty():
+			return keymap
 	return UNAVAILABLE
+
+
+# Locale ids ("en_US.UTF-8") are glibc handles; the page names the language and
+# region instead. Anything that is not a language_territory id (C, POSIX, a
+# value with a modifier) is shown with the charset dropped and nothing else.
+const _LANGUAGES := {
+	"en": "English", "de": "German", "fr": "French", "es": "Spanish",
+	"it": "Italian", "pt": "Portuguese", "ru": "Russian", "ja": "Japanese",
+	"zh": "Chinese", "ko": "Korean", "ar": "Arabic", "hi": "Hindi",
+	"bn": "Bengali", "tr": "Turkish", "nl": "Dutch", "pl": "Polish",
+	"sv": "Swedish", "cs": "Czech", "el": "Greek", "he": "Hebrew",
+	"fa": "Persian", "ur": "Urdu", "uk": "Ukrainian", "vi": "Vietnamese",
+	"th": "Thai", "id": "Indonesian", "ro": "Romanian", "hu": "Hungarian",
+	"fi": "Finnish", "da": "Danish", "no": "Norwegian", "sk": "Slovak",
+}
+
+const _REGIONS := {
+	"US": "United States", "GB": "United Kingdom", "BD": "Bangladesh",
+	"IN": "India", "DE": "Germany", "FR": "France", "ES": "Spain",
+	"IT": "Italy", "BR": "Brazil", "PT": "Portugal", "RU": "Russia",
+	"JP": "Japan", "CN": "China", "TW": "Taiwan", "KR": "South Korea",
+	"CA": "Canada", "AU": "Australia", "NL": "Netherlands", "PL": "Poland",
+	"SE": "Sweden", "TR": "Türkiye", "SA": "Saudi Arabia", "PK": "Pakistan",
+	"UA": "Ukraine", "MX": "Mexico", "AR": "Argentina", "ZA": "South Africa",
+	"CH": "Switzerland", "AT": "Austria", "BE": "Belgium", "DK": "Denmark",
+	"NO": "Norway", "FI": "Finland", "IE": "Ireland", "IL": "Israel",
+	"AE": "United Arab Emirates", "SG": "Singapore", "MY": "Malaysia",
+	"ID": "Indonesia", "TH": "Thailand", "VN": "Vietnam", "PH": "Philippines",
+	"NG": "Nigeria", "EG": "Egypt", "KE": "Kenya",
+}
+
+
+func _locale_label(raw: String) -> String:
+	var text := raw.strip_edges()
+	if text.is_empty():
+		return UNAVAILABLE
+	if text == "C" or text == "POSIX":
+		return text
+	var charset: int = text.find(".")
+	if charset > 0:
+		text = text.substr(0, charset)
+	var modifier: int = text.find("@")
+	if modifier > 0:
+		text = text.substr(0, modifier)
+	var parts := text.split("_", false)
+	if parts.is_empty():
+		return UNAVAILABLE
+	var language := str(_LANGUAGES.get(str(parts[0]).to_lower(), ""))
+	if language.is_empty():
+		# Not a language this build knows: the id itself is the honest answer.
+		return text
+	if parts.size() < 2 or str(parts[1]).is_empty():
+		return language
+	var territory := str(parts[1]).to_upper()
+	var region := str(_REGIONS.get(territory, ""))
+	return language + " (" + (region if not region.is_empty() else territory) + ")"
 
 
 func _timezone() -> String:

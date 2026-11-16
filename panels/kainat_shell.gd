@@ -222,7 +222,14 @@ static func read_lines(path: String) -> PackedStringArray:
 
 static func home() -> String:
 	var h: String = OS.get_environment("HOME")
-	return h if not h.is_empty() else OS.get_user_data_dir()
+	if h.is_empty():
+		return OS.get_user_data_dir()
+	# $HOME is normally absolute without a trailing separator, but a login
+	# manager may export "/home/user/". Every caller appends "/name" to this
+	# value, so a trailing separator would show the user "/home/user//name".
+	while h.length() > 1 and h.ends_with("/"):
+		h = h.substr(0, h.length() - 1)
+	return h
 
 
 # --- KDE config (used sparingly while KDE is still the base) ----------------
@@ -548,8 +555,10 @@ static func remove_command(package: String) -> String:
 # --- disk manager helpers ---------------------------------------------------
 
 static func list_block_devices() -> Array:
-	# Returns array of dicts with: name, mountpoint, size, type, children
-	var output: String = run_capture("lsblk -o NAME,MOUNTPOINT,SIZE,TYPE -n -J")
+	# Returns array of dicts with: name, mountpoint, size, type, rm,
+	# hotplug, children. rm/hotplug are the flags that tell a fixed disk
+	# from hot-pluggable media.
+	var output: String = run_capture("lsblk -o NAME,MOUNTPOINT,SIZE,TYPE,RM,HOTPLUG -n -J")
 	var json: JSON = JSON.new()
 	var err: int = json.parse(output)
 	if err != OK:

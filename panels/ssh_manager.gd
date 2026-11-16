@@ -296,12 +296,17 @@ func _open_provider(url: String, label: String) -> void:
 func _on_edit_ssh_config() -> void:
 	var config_path := _ssh_dir + "config"
 	if not Sh.file_exists(config_path):
-		Sh.run("touch " + Sh.quote(config_path))
-		Sh.run("chmod 600 " + Sh.quote(config_path))
-	
-	if Sh.has_tool("kate"):
-		Sh.run("kate " + Sh.quote(config_path) + " &")
-	elif Sh.has_tool("gedit"):
-		Sh.run("gedit " + Sh.quote(config_path) + " &")
-	else:
-		Sh.run("xdg-open " + Sh.quote(config_path))
+		# OpenSSH refuses to use a config readable by others, so it is created
+		# 0600 rather than created and then chmod-ed.
+		if Sh.run_wait("mkdir -p " + Sh.quote(_ssh_dir)
+				+ " && install -m 600 /dev/null " + Sh.quote(config_path)) != 0:
+			notify("Could not create " + config_path + ".")
+			return
+
+	# Prefer a real editor and fall back to the desktop's default handler; if
+	# none of them exist the user gets told instead of nothing happening.
+	for editor in ["kate", "kwrite", "gedit", "xdg-open"]:
+		if Sh.has_tool(editor):
+			Sh.run(editor + " " + Sh.quote(config_path) + " >/dev/null 2>&1 &")
+			return
+	notify("No text editor was found to open " + config_path + ".")

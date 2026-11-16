@@ -30,13 +30,13 @@ func _rebuild() -> void:
 func _build_ui() -> void:
 	section("Input Method Framework")
 	var c := card()
-	var frameworks: Array = ["fcitx5 (recommended)", "IBus"]
+	var frameworks: Array = ["Fcitx 5 (recommended)", "IBus"]
 	var current := Sh.get_input_method_framework()
 	choice_row(c, "Framework", "Engine that handles typing in other languages.", "F",
 		frameworks, 0 if current == "fcitx5" else 1, func(index: int) -> void:
 			var fw := "fcitx5" if index == 0 else "ibus"
 			Sh.set_input_method_framework(fw)
-			notify("Framework set to " + fw + ". Log out and back in to apply."))
+			notify("Framework set to " + _framework_label(fw) + ". Log out and back in to apply."))
 
 	# The framework itself has to be installed before any engine is useful.
 	if not bool(_installed.get("fcitx5", false)):
@@ -76,9 +76,20 @@ func _build_ui() -> void:
 
 	section("Current Session")
 	c = card()
-	info_row(c, "Active Framework", Sh.get_input_method_framework())
+	info_row(c, "Active Framework", _framework_label(Sh.get_input_method_framework()))
 	info_row(c, "Daemon", _daemon_status())
 	info_row(c, "Note", "Log out and back in after installing a framework.")
+
+
+# The framework is stored as "fcitx5"/"ibus" because that is what kdeglobals and
+# the environment variables take; neither is how the project is named.
+func _framework_label(framework: String) -> String:
+	match framework:
+		"fcitx5":
+			return "Fcitx 5"
+		"ibus":
+			return "IBus"
+	return framework if not framework.is_empty() else UNAVAILABLE
 
 
 func _add_engine_section(title: String, engines: Array) -> void:

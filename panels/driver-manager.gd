@@ -3,18 +3,15 @@ extends SettingsPanel
 # Auto-detects NVIDIA, AMD, Intel GPUs and Wi-Fi, offers one-click install.
 
 var _driver_cards: Array[Node] = []
-var _scan_card: Node = null
 
 
 func build() -> void:
 	page_header("Driver Manager", "Manage hardware drivers, firmware, and peripherals.")
 	
-	# Smart Driver Installer Section
+	# Smart Driver Installer Section. The scan results are appended under this
+	# heading when the deferred detect finishes, so there is no stand-in card:
+	# one could only ever be left behind by a scan that never ran.
 	section("Smart Driver Installer")
-	var c := card()
-	_scan_card = c.get_parent()
-	info_row(c, "Scanning...", "Detecting hardware and checking for missing drivers")
-	
 	defer(_populate_drivers)
 	
 	# Traditional KCM sections
@@ -54,12 +51,8 @@ func _driver_card() -> VBoxContainer:
 
 
 func _populate_drivers() -> void:
-	# Drop the placeholder and anything a previous scan produced, so repeated
-	# scans replace their results instead of stacking duplicates.
-	if is_instance_valid(_scan_card):
-		content.remove_child(_scan_card)
-		_scan_card.queue_free()
-	_scan_card = null
+	# Drop whatever a previous scan produced, so repeated scans replace their
+	# results instead of stacking duplicates.
 	for old in _driver_cards:
 		if is_instance_valid(old):
 			content.remove_child(old)

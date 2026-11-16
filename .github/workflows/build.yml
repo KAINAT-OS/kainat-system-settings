@@ -3,7 +3,7 @@ name: Build Linux release
 # Produces every Linux artefact for Kainat System Settings and, on a version
 # tag, publishes them as a GitHub Release:
 #
-#   build     -> release binary + developer binary + zips      (linux-binaries)
+#   build     -> release binary + internal debug binary + zips      (linux-binaries)
 #   deb       -> Debian package for Kainat OS / Debian / Ubuntu (debian-package)
 #   appimage  -> portable single-file AppImage                  (appimage)
 #   release   -> checksums + GitHub Release with all artefacts
@@ -163,7 +163,7 @@ jobs:
             exit 1
           fi
 
-      - name: Export release and developer builds
+      - name: Export release and internal debug builds
         run: |
           set -euo pipefail
           REDOT="$HOME/.cache/redot-ci/redot"
@@ -172,9 +172,9 @@ jobs:
           echo "Exporting release build"
           "$REDOT" --headless --path . --export-release "Linux" \
             "build/kainat-system-settings-${VERSION}-linux.x86_64"
-          echo "Exporting developer build"
+          echo "Exporting internal debug build"
           "$REDOT" --headless --path . --export-debug "Linux" \
-            "build/kainat-system-settings-${VERSION}-dev.x86_64"
+            "build/kainat-system-settings-${VERSION}-internal-debug.x86_64"
           chmod +x build/*.x86_64
           ls -lh build
 
@@ -204,8 +204,8 @@ jobs:
 
           make_bundle "build/kainat-system-settings-${VERSION}-linux.x86_64" \
             "kainat-system-settings-${VERSION}-linux-x86_64" "release build"
-          make_bundle "build/kainat-system-settings-${VERSION}-dev.x86_64" \
-            "kainat-system-settings-${VERSION}-dev-x86_64" "developer build"
+          make_bundle "build/kainat-system-settings-${VERSION}-internal-debug.x86_64" \
+            "kainat-system-settings-${VERSION}-internal-debug-x86_64" "internal debug build"
 
           rm -rf build/.stage
           ( cd build && sha256sum ./*.x86_64 ./*.zip > SHA256SUMS.txt )

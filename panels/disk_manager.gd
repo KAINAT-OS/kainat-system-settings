@@ -7,14 +7,10 @@ var _disk_cards: Array[Node] = []
 
 func build() -> void:
 	page_header("Disk Manager", "Manage storage devices, format drives, and monitor health.")
-	_build_placeholder()
+	# No stand-in row while the scan runs: the deferred scan finishes before the
+	# page is ever painted, so a "Scanning..." card could only survive as a
+	# leftover if the scan failed.
 	defer(_populate)
-
-
-func _build_placeholder() -> void:
-	var c := card()
-	_disk_cards.append(c.get_parent())
-	info_row(c, "Scanning...", "Detecting storage devices")
 
 
 func _clear_cards() -> void:
@@ -103,13 +99,16 @@ func _build_disk_card(dev: Dictionary) -> void:
 	if dtype == "disk":
 		var actions := HBoxContainer.new()
 		c.add_child(actions)
-		
-		# Eject (if removable)
-		var eject_btn := Button.new()
-		eject_btn.text = "Eject"
-		eject_btn.flat = true
-		eject_btn.pressed.connect(_on_eject.bind("/dev/" + name))
-		actions.add_child(eject_btn)
+
+		# Only hot-pluggable media can be ejected. Offering it on a fixed disk
+		# promises something udisks refuses to do — and puts a power-off button
+		# next to the disk that holds the running system.
+		if bool(dev.get("rm", false)) or bool(dev.get("hotplug", false)):
+			var eject_btn := Button.new()
+			eject_btn.text = "Eject"
+			eject_btn.flat = true
+			eject_btn.pressed.connect(_on_eject.bind("/dev/" + name))
+			actions.add_child(eject_btn)
 		
 		# Format
 		var format_btn := Button.new()

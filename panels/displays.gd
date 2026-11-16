@@ -41,9 +41,14 @@ func build() -> void:
 
 	section("Brightness")
 	var c := card()
-	slider_row(c, "Screen brightness", "Adjust the primary display backlight.", "B", 10, 100,
-		_current_brightness(), func(v: float) -> void:
-			debounce("brightness", 0.08, func() -> void: _set_brightness(primary, v)), "%")
+	if _can_dim(primary):
+		slider_row(c, "Screen brightness", "Adjust the primary display backlight.", "B", 10, 100,
+			_current_brightness(), func(v: float) -> void:
+				debounce("brightness", 0.08, func() -> void: _set_brightness(primary, v)), "%")
+	else:
+		unavailable_row(c, "Screen brightness",
+			"This display reports no dimmable backlight, and the session is not X11, "
+			+ "so there is nothing to dim from here.", "B")
 
 	_build_resolution_section()
 
@@ -253,27 +258,49 @@ func _brightness_displays() -> Array:
 
 
 func _current_brightness() -> float:
+	# Without a PowerDevil display there is no readable level; 100 % is the
+	# neutral value the xrandr fallback starts from, not a measurement.
 	if _brightness_display.is_empty() or _brightness_max <= 0.0:
 		return 100.0
-	var current := float(_brightness_property("Brightness"))
-	return clampf(current / _brightness_max * 100.0, 0.0, 100.0)
+	var raw := _brightness_property("Brightness")
+	if not raw.is_valid_int():
+		return 100.0
+	return clampf(float(raw.to_int()) / _brightness_max * 100.0, 0.0, 100.0)
+
+
+# PowerDevil drives the real backlight on both session types; the xrandr gamma
+# trick only works on X11 with a known output. With neither, the slider would be
+# a control that cannot move anything.
+func _can_dim(output: String) -> bool:
+	if not _brightness_display.is_empty() and _brightness_max > 0.0:
+		return true
+	return not output.is_empty() and OS.get_environment("XDG_SESSION_TYPE") == "x11"
 
 
 func _set_brightness(output: String, percent: float) -> void:
 	if not _brightness_display.is_empty() and _brightness_max > 0.0:
-		var target: int = int(round(_brightness_max * clampf(percent, 0.0, 100.0) / 100.0))
 		var tool := _qdbus_tool()
 		if tool.is_empty():
+			notify("Could not reach the brightness service.")
 			return
-		Sh.run(tool + " " + Sh.quote(POWERDEVIL_SERVICE) + " "
+		var target: int = int(round(_brightness_max * clampf(percent, 0.0, 100.0) / 100.0))
+		# Debounced drags: report a failure without stalling the UI thread.
+		run_async(tool + " " + Sh.quote(POWERDEVIL_SERVICE) + " "
 			+ Sh.quote(BRIGHTNESS_PATH + "/" + _brightness_display) + " "
-			+ Sh.quote(DISPLAY_INTERFACE + ".SetBrightness") + " " + str(target) + " 0")
+			+ Sh.quote(DISPLAY_INTERFACE + ".SetBrightness") + " " + str(target) + " 0",
+			func(code: int) -> void:
+				if code != 0:
+					notify("Could not set the screen brightness."))
 		return
 	# Fall back to the xrandr gamma trick, which only has an effect on X11.
 	if output.is_empty() or OS.get_environment("XDG_SESSION_TYPE") != "x11":
+		notify("This display cannot be dimmed from here.")
 		return
 	var value: String = "%.2f" % (percent / 100.0)
-	Sh.run("xrandr --output " + Sh.quote(output) + " --brightness " + value)
+	run_async("xrandr --output " + Sh.quote(output) + " --brightness " + value,
+		func(code: int) -> void:
+			if code != 0:
+				notify("Could not set the screen brightness."))
 
 
 func _brightness_property(property: String) -> String:

@@ -114,9 +114,14 @@ func _lock_session() -> void:
 
 # Plasma's shutdown service handles logout/reboot/poweroff with the same
 # polkit rules as the desktop's own menu, so no password prompt is needed.
+# The call itself is fire-and-forget, so the service is looked up first: calling
+# a method on an unregistered name would sit on DBus activation and freeze the
+# UI, and the caller needs to know whether to try the fallback instead.
 func _shutdown_call(method: String) -> bool:
 	var tool := "qdbus6" if Sh.has_tool("qdbus6") else ("qdbus" if Sh.has_tool("qdbus") else "")
 	if tool.is_empty():
+		return false
+	if not Sh.run_lines(tool + " 2>/dev/null").has("org.kde.Shutdown"):
 		return false
 	Sh.run(tool + " org.kde.Shutdown /Shutdown org.kde.Shutdown." + method
 		+ " >/dev/null 2>&1 &")
@@ -136,7 +141,11 @@ func _restart() -> void:
 	if _shutdown_call("logoutAndReboot"):
 		return
 	if Sh.has_tool("systemctl"):
-		Sh.run("systemctl reboot >/dev/null 2>&1 &")
+		# The gate above sends more systems down this path, so the result is
+		# reported instead of assumed: polkit can still refuse the request.
+		run_async("systemctl reboot", func(code: int) -> void:
+			if code != 0:
+				notify("Could not restart the computer (systemctl exited with " + str(code) + ")."))
 		return
 	notify("Could not restart the computer.")
 
@@ -145,6 +154,8 @@ func _shutdown() -> void:
 	if _shutdown_call("logoutAndShutdown"):
 		return
 	if Sh.has_tool("systemctl"):
-		Sh.run("systemctl poweroff >/dev/null 2>&1 &")
+		run_async("systemctl poweroff", func(code: int) -> void:
+			if code != 0:
+				notify("Could not shut down the computer (systemctl exited with " + str(code) + ")."))
 		return
 	notify("Could not shut down the computer.")

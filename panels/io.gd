@@ -4,6 +4,7 @@ extends SettingsPanel
 
 var _sound_card: VBoxContainer
 var _point_card: VBoxContainer
+var _mute_check: CheckButton
 
 
 func build() -> void:
@@ -65,6 +66,29 @@ func build() -> void:
 
 
 func _populate() -> void:
+	_populate_audio()
+	action_row(_sound_card, "Test Speakers", "Play a short sample on the default output.", "T",
+		"Play", _test_sound)
+	kcm_row(_sound_card, "Audio Devices", "Outputs, inputs and per-app volume.", "A", "kcm_pulseaudio")
+
+	var one_click: String = "One-click to open files"
+	toggle_row(_point_card, one_click, "Open files and folders with a single click.", "O",
+		_is_single_click(), func(on: bool) -> void:
+			Sh.kde_write("kdeglobals", "KDE", "SingleClick", "true" if on else "false")
+			notify("Click behaviour updated."))
+
+
+# --- audio ------------------------------------------------------------------
+
+# The native audio controls are pactl calls; without the tool the rows would
+# look live and silently do nothing, so they degrade to one explainable row.
+func _populate_audio() -> void:
+	if not Sh.has_tool("pactl"):
+		unavailable_row(_sound_card, "Volume and mute",
+			"pactl is not installed, so the output volume cannot be changed here " +
+			"(package: pulseaudio-utils).", "V")
+		return
+
 	var sinks: Array = _audio_devices("sinks")
 	if sinks.size() > 1:
 		var labels: Array = []
@@ -78,26 +102,24 @@ func _populate() -> void:
 			labels, selected, func(idx: int) -> void:
 				_set_default_sink(str(sinks[idx]["name"]), str(sinks[idx]["label"])))
 
-	var volume: int = _get_volume()
-	slider_row(_sound_card, "Output volume", "Master volume for the default sink.", "V", 0, 150, volume,
-		func(v: float) -> void:
+	# A drag emits many values; run_async reports failures without blocking the
+	# UI thread the way run_wait would.
+	slider_row(_sound_card, "Output volume", "Master volume for the default sink.", "V",
+		0, 150, _get_volume(), func(v: float) -> void:
 			debounce("volume", 0.12, func() -> void:
-				Sh.run("pactl set-sink-volume @DEFAULT_SINK@ %d%%" % int(v))), "%")
-	toggle_row(_sound_card, "Mute", "Silence all audio output.", "M", _is_muted(),
-		func(on: bool) -> void:
-			Sh.run("pactl set-sink-mute @DEFAULT_SINK@ " + ("1" if on else "0")))
-	action_row(_sound_card, "Test Speakers", "Play a short sample on the default output.", "T",
-		"Play", _test_sound)
-	kcm_row(_sound_card, "Audio Devices", "Outputs, inputs and per-app volume.", "A", "kcm_pulseaudio")
-
-	var one_click: String = "One-click to open files"
-	toggle_row(_point_card, one_click, "Open files and folders with a single click.", "O",
-		_is_single_click(), func(on: bool) -> void:
-			Sh.kde_write("kdeglobals", "KDE", "SingleClick", "true" if on else "false")
-			notify("Click behaviour updated."))
-
-
-# --- audio ------------------------------------------------------------------
+				run_async("pactl set-sink-volume @DEFAULT_SINK@ %d%%" % int(v),
+					func(code: int) -> void:
+						if code != 0:
+							notify("Could not set the output volume."))), "%")
+	_mute_check = toggle_row(_sound_card, "Mute", "Silence all audio output.", "M",
+		_is_muted(), func(on: bool) -> void:
+			run_async("pactl set-sink-mute @DEFAULT_SINK@ " + ("1" if on else "0"),
+				func(code: int) -> void:
+					if code == 0:
+						return
+					if _mute_check != null:
+						_mute_check.set_pressed_no_signal(not on)
+					notify("Could not " + ("mute" if on else "unmute") + " the audio output.")))
 
 # [{name, label}] for "sinks" (outputs) or "sources" (inputs). pactl 16+ can
 # emit JSON with human descriptions; the tab-separated listing is the fallback.

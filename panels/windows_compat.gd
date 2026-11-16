@@ -109,7 +109,7 @@ func _build_tools(wine_ver: String, tricks_ver: String) -> void:
 	var c: VBoxContainer = _tools_card
 
 	if not wine_ver.is_empty():
-		info_row(c, "Wine version", wine_ver)
+		info_row(c, "Wine version", _short_version(wine_ver))
 	if Sh.has_tool("wine"):
 		action_row(c, "Wine", "Windows application compatibility layer", "W",
 				"Configure", func() -> void: _launch_or_notify("winecfg"))
@@ -379,7 +379,15 @@ func _prefix_arch(prefix: String) -> String:
 	if not FileAccess.file_exists(reg):
 		return ""
 	var line := Sh.run_capture("grep -m1 '^#arch=' " + Sh.quote(reg) + " 2>/dev/null").strip_edges()
-	return line.trim_prefix("#arch=")
+	# "#arch=win64" is the registry's own marker for the prefix ABI; the row and
+	# the tile name the architecture the way a person does.
+	var marker := line.trim_prefix("#arch=")
+	match marker:
+		"win64":
+			return "64-bit"
+		"win32":
+			return "32-bit"
+	return marker
 
 
 # DXVK's replacement DLL carries the string "DXVK"; Wine's own does not —

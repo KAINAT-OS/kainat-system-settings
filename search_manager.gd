@@ -17,10 +17,18 @@ func _build_index() -> void:
 	dir.list_dir_begin()
 	var entry := dir.get_next()
 	while entry != "":
+		# panels/ also holds the shared base class and the RefCounted shell
+		# helper. Only Control scripts are pages; indexing the helper produced a
+		# phantom result whose title was one of the KCM plugin paths mentioned
+		# in a comment next to a mention of kcm_row().
 		if entry.ends_with(".gd") and not entry.begins_with("."):
-			var panel_name := entry.trim_suffix(".gd")
-			_scan_panel(panel_name)
+			var script: GDScript = load("res://panels/" + entry)
+			if script != null:
+				var base := script.get_instance_base_type()
+				if base == "Control" or ClassDB.is_parent_class(base, "Control"):
+					_scan_panel(entry.trim_suffix(".gd"))
 		entry = dir.get_next()
+	dir.list_dir_end()
 
 
 func _scan_panel(panel_name: String) -> void:
@@ -42,18 +50,21 @@ func _scan_panel(panel_name: String) -> void:
 	var seen: Dictionary = {}
 
 	# The page title itself is worth finding: searching "backups" should open
-	# the Backups page even when no row repeats the word.
+	# the Backups page even when no row repeats the word. A script without one
+	# is not a page at all, so it contributes nothing to the index.
 	var header := RegEx.new()
 	header.compile("page_header\\(\\s*\"([^\"]+)\"\\s*,\\s*\"([^\"]*)\"")
 	var header_match := header.search(text)
-	if header_match:
-		var header_title := header_match.get_string(1)
-		seen[header_title] = true
-		_index.append({
-			"panel": panel_name,
-			"title": header_title,
-			"subtitle": header_match.get_string(2),
-		})
+	if not header_match:
+		return
+
+	var header_title := header_match.get_string(1)
+	seen[header_title] = true
+	_index.append({
+		"panel": panel_name,
+		"title": header_title,
+		"subtitle": header_match.get_string(2),
+	})
 
 	for m in regex.search_all(text):
 		var title := m.get_string(1)

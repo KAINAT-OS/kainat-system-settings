@@ -36,6 +36,10 @@ func build() -> void:
 
 	section("Details")
 	var c3 := card()
+	# The version the app itself was built as. Reported first because it is the
+	# first thing a bug report needs, and it is not comparable to the OS version
+	# shown above (two independent numbers).
+	info_row(c3, "App Version", _app_version())
 	nav_row(c3, "Hardware & System Information", "Full component inventory.", "H",
 		func() -> void: _open_page("hardware"))
 	kcm_row(c3, "About This Distribution", "Distro-provided about page.", "A", "kcm_about-distro")
@@ -72,6 +76,7 @@ func _open_page(page_name: String) -> void:
 func _system_report() -> String:
 	var rel: Dictionary = Sh.os_release()
 	var lines := PackedStringArray()
+	lines.append("App Version: " + _app_version())
 	lines.append("Operating System: " + str(rel.get("PRETTY_NAME", "Kainat OS")))
 	lines.append("Version: " + str(rel.get("VERSION", UNAVAILABLE)))
 	lines.append("Kernel: " + _kernel())
@@ -90,6 +95,13 @@ func _system_report() -> String:
 func _copy_report() -> void:
 	DisplayServer.clipboard_set(_system_report())
 	notify("System information copied to the clipboard.")
+
+
+# The app's own release number, read from the one place it is declared, so
+# this page cannot drift from what the installer and the release tag say.
+func _app_version() -> String:
+	var version := str(ProjectSettings.get_setting("application/config/version", "")).strip_edges()
+	return version if not version.is_empty() else UNAVAILABLE
 
 
 func _hostname() -> String:
