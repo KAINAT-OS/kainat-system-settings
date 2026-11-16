@@ -5,8 +5,9 @@ users, disks, services and firewall in one window — no terminal, no editing
 configuration files by hand.
 
 The app is deliberately **GUI-only**. When a feature needs a command-line tool
-that is not installed, the panel shows an *Install* row naming the package
-instead of failing silently or printing an error to a console you cannot see.
+that is not installed, the panel says which tool is missing instead of failing
+silently or printing an error to a console you cannot see. Where we can install
+it, the row offers an *Install* action and says what will be installed.
 
 ## Install
 
@@ -53,12 +54,15 @@ prefer a folder to a single file.
 
 ## Verify the download
 
-Each release ships `SHA256SUMS.txt`. Put it in the same directory as the file you
-downloaded, then run:
+Each release ships `SHA256SUMS.txt`, covering every published asset. Put it in the
+same directory as the file you downloaded, then run:
 
 ```sh
-sha256sum -c SHA256SUMS.txt
+sha256sum -c --ignore-missing SHA256SUMS.txt
 ```
+
+`--ignore-missing` skips the assets you did not download; without it `sha256sum`
+reports them as missing files and exits non-zero.
 
 ## Requirements
 
@@ -68,16 +72,18 @@ sha256sum -c SHA256SUMS.txt
 
 The `.deb` declares its library dependencies, so `apt` resolves those for you.
 Desktop features are discovered at run time — NetworkManager, systemd, UPower,
-power-profiles-daemon, PipeWire or PulseAudio, and the KDE settings modules are
-used when they are present and reported as *Install* rows when they are not.
+power-profiles-daemon, PipeWire or PulseAudio. A KDE settings module is used when
+present; a missing one shows a row saying the module is not installed.
 
 ## Building from source
 
-The interface is GDScript for the Redot engine 26.2. The engine path this
-checkout expects is in `redotpath.txt`.
+The interface is GDScript for the Redot engine 26.2. Point `redotpath.txt` at your
+own engine binary and install the Redot 26.2 export templates; the `--import` pass
+below resolves the shared panel classes before the export runs.
 
 ```sh
 ENGINE="$(cat redotpath.txt)"
+"$ENGINE" --headless --path . --import
 "$ENGINE" --headless --path . --export-release "Linux" "kainat-system-settings.x86_64"
 packaging/linux/make-deb.sh       "kainat-system-settings.x86_64" "1.4.4"
 packaging/linux/make-appimage.sh  "kainat-system-settings.x86_64" "1.4.4"
@@ -99,9 +105,11 @@ internal debug builds, builds the `.deb` and the AppImage, writes
 | `icons/` | icon assets |
 | `packaging/linux/` | `.deb` and AppImage builders, desktop entry, icon |
 | `project.godot` | engine configuration; the single source of the version |
+| `LICENSE` | GNU GPL v3 licence text |
 
 ## Licence
 
-This repository carries no `LICENSE` file of its own. The `.deb` installs
-`/usr/share/doc/kainat-system-settings/copyright`, which points at the project homepage for the
-licence terms.
+We release the app under the GNU General Public License, version 3 or any later
+version. The full text ships in `LICENSE` at the repository root, and the `.deb`
+installs the same licence as a DEP-5 machine-readable file at
+`/usr/share/doc/kainat-system-settings/copyright`.

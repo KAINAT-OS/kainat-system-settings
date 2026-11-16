@@ -34,7 +34,7 @@ static var _task_seq: int = 0
 static func _task_file(suffix: String) -> String:
 	_task_seq += 1
 	return OS.get_temp_dir().path_join(
-		"[APPNAME]-task-%d-%d.%s" % [OS.get_process_id(), _task_seq, suffix])
+		"kainat-system-settings-task-%d-%d.%s" % [OS.get_process_id(), _task_seq, suffix])
 
 
 # Delete a scratch file, tolerating one that was never written.
