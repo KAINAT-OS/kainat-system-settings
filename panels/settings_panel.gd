@@ -75,7 +75,7 @@ func _run_lazy() -> void:
 # exit status lands in a temporary file, which a timer polls.
 func run_async(command: String, on_done: Callable) -> void:
 	var status_file := "/tmp/kainat-task-" + str(Time.get_ticks_usec()) + ".status"
-	var pid := OS.create_process("bash", ["-c", Sh.protect_command(command) + "\nprintf '%s' $? > " + Sh.quote(status_file)])
+	var pid := OS.create_process("bash", ["-c", command + "\nprintf '%s' $? > " + Sh.quote(status_file)])
 	if pid <= 0:
 		on_done.call(-1)
 		return
@@ -102,7 +102,7 @@ func run_async_capture(command: String, on_done: Callable) -> void:
 	var out_file := "/tmp/kainat-task-" + stamp + ".out"
 	var status_file := "/tmp/kainat-task-" + stamp + ".status"
 	var pid := OS.create_process("bash", ["-c",
-		"(" + Sh.protect_command(command) + ") > " + Sh.quote(out_file) + " 2>&1\nprintf '%s' $? > "
+		"(" + command + ") > " + Sh.quote(out_file) + " 2>&1\nprintf '%s' $? > "
 		+ Sh.quote(status_file)])
 	if pid <= 0:
 		on_done.call(-1, "")

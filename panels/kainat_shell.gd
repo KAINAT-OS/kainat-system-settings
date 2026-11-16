@@ -16,43 +16,52 @@ static var _tool_cache: Dictionary = {}
 
 
 # --- process helpers -------------------------------------------------------
+#
+# Every command goes to bash through OS.create_process(), which hands the
+# argument to the child untouched. OS.execute() is deliberately not used: this
+# engine expands $VAR, $1 and `cmd` inside its argument *before* the shell ever
+# runs — even inside single quotes — and refuses any command containing a
+# double quote, so a command written with ordinary shell quoting cannot
+# survive that path. Handed to bash directly, the string the caller wrote
+# arrives verbatim and bash expands it exactly once, as written.
 
-# This engine expands $VAR, $1 and `cmd` inside OS.execute()/create_process()
-# argument strings before the shell ever runs them — even inside single
-# quotes — so a command written with ordinary shell quoting loses its
-# variables. Escape exactly those sequences here; bash then performs the
-# expansion once, with the quoting the caller actually wrote.
-static func protect_command(command: String) -> String:
-	var protected := String()
-	var i := 0
-	while i < command.length():
-		var ch := command[i]
-		if ch == "\\":
-			# Keep existing escapes intact and skip the escaped character.
-			protected += ch
-			if i + 1 < command.length():
-				protected += command[i + 1]
-			i += 2
-			continue
-		if ch == "$":
-			var next := command[i + 1] if i + 1 < command.length() else ""
-			var expandable := next == "{" or next == "(" or next == "$" \
-				or (next.length() == 1 and (next.is_valid_identifier() or next.is_valid_int()))
-			protected += "\\$" if expandable else "$"
-			i += 1
-			continue
-		if ch == "`":
-			protected += "\\`"
-			i += 1
-			continue
-		protected += ch
-		i += 1
-	return protected
+static var _task_seq: int = 0
+
+
+# Scratch file for one command's output or exit status. The name carries the
+# process id and a counter, so two windows of the app — or two commands in
+# flight at once — can never share a file.
+static func _task_file(suffix: String) -> String:
+	_task_seq += 1
+	return OS.get_temp_dir().path_join(
+		"[APPNAME]-task-%d-%d.%s" % [OS.get_process_id(), _task_seq, suffix])
+
+
+# Delete a scratch file, tolerating one that was never written.
+static func _drop(path: String) -> void:
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(path)
+
+
+# Block until a child started with OS.create_process() has finished. Polling is
+# what actually reaps the child; the engine offers no blocking wait for it.
+static func _await(pid: int) -> void:
+	while OS.is_process_running(pid):
+		OS.delay_msec(2)
+
+
+# Read a scratch file back, removing it as we go.
+static func _take(path: String) -> String:
+	if not FileAccess.file_exists(path):
+		return ""
+	var text := FileAccess.get_file_as_string(path)
+	DirAccess.remove_absolute(path)
+	return text
 
 
 static func run(command: String) -> int:
 	# Fire-and-forget shell command.
-	return OS.create_process("bash", ["-c", protect_command(command)])
+	return OS.create_process("bash", ["-c", command])
 
 
 # Blocking variant of run(): waits for the command to finish and returns its
@@ -60,17 +69,39 @@ static func run(command: String) -> int:
 # really took effect, or telling the user a mode change failed — instead of
 # firing and hoping. Keep it off the UI path for anything slow (apt upgrade,
 # pkexec authentication) and keep plain run() for slider/drag spam.
+#
+# The command runs inside a subshell, so an `exit` in it still lets the status
+# write below happen. read_stderr drops the command's diagnostics; left off,
+# they reach the engine console exactly as before.
 static func run_wait(command: String, read_stderr: bool = false) -> int:
-	var output: Array = []
-	return OS.execute("bash", ["-c", protect_command(command)], output, read_stderr)
+	var status := _task_file("status")
+	_drop(status)
+	var script := "(\n" + command + "\n)"
+	if read_stderr:
+		script += " 2>/dev/null"
+	script += "\nprintf '%s' $? > " + quote(status)
+	var pid := OS.create_process("bash", ["-c", script])
+	if pid <= 0:
+		return -1
+	_await(pid)
+	var text := _take(status)
+	return text.strip_edges().to_int() if not text.is_empty() else -1
 
 
+# Capture variant of run_wait(): returns the command's standard output. With
+# read_stderr the command's diagnostics are folded into that text too, which is
+# what the previous implementation returned.
 static func run_capture(command: String, read_stderr: bool = false) -> String:
-	var output: Array = []
-	OS.execute("bash", ["-c", protect_command(command)], output, read_stderr)
-	if output.is_empty():
+	var path := _task_file("out")
+	_drop(path)
+	var script := "(\n" + command + "\n) > " + quote(path)
+	if read_stderr:
+		script += " 2>&1"
+	var pid := OS.create_process("bash", ["-c", script])
+	if pid <= 0:
 		return ""
-	return str(output[0])
+	_await(pid)
+	return _take(path)
 
 
 static func run_lines(command: String) -> PackedStringArray:
