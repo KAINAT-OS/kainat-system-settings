@@ -193,6 +193,7 @@ func page_header(title: String, subtitle: String = "") -> void:
 	var title_label := Label.new()
 	title_label.text = title
 	title_label.add_theme_font_size_override("font_size", 26)
+	_trim_label(title_label)
 	content.add_child(title_label)
 
 	if not subtitle.is_empty():
@@ -253,6 +254,18 @@ func card() -> VBoxContainer:
 
 # --- list rows --------------------------------------------------------------
 
+# A single-line label advertises its whole text width as a minimum size, which
+# makes the ScrollContainer wider than the window and clips everything on the
+# right. Trimming keeps the page inside the window; the untrimmed text is kept
+# as a tooltip so nothing is lost. Only safe for labels that are stretched to
+# their parent's width (i.e. not a bare child of an HBoxContainer).
+func _trim_label(label: Label, full_text: String = "") -> Label:
+	label.clip_text = true
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.tooltip_text = label.text if full_text.is_empty() else full_text
+	return label
+
+
 func _leading(glyph: String, icon_path: String = "") -> Control:
 	if not icon_path.is_empty() and ResourceLoader.exists(icon_path):
 		var tex := TextureRect.new()
@@ -288,6 +301,7 @@ func _text_column(title: String, subtitle: String) -> VBoxContainer:
 	var t := Label.new()
 	t.text = title
 	t.add_theme_font_size_override("font_size", 15)
+	_trim_label(t)
 	box.add_child(t)
 
 	if not subtitle.is_empty():
@@ -599,6 +613,7 @@ func info_row(card_box: VBoxContainer, label_text: String, value: String) -> HBo
 	row.add_theme_constant_override("separation", 12)
 
 	var left := MarginContainer.new()
+	left.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	left.add_theme_constant_override("margin_left", 12)
 	var l := Label.new()
 	l.text = label_text
@@ -606,16 +621,16 @@ func info_row(card_box: VBoxContainer, label_text: String, value: String) -> HBo
 	left.add_child(l)
 	row.add_child(left)
 
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(spacer)
-
+	# The value takes every pixel the label does not need and trims itself
+	# instead of pushing the page wider than the window.
 	var v := Label.new()
 	v.text = value
 	v.add_theme_font_size_override("font_size", 14)
 	v.add_theme_color_override("font_color", _muted())
 	v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_trim_label(v, value)
 	var right := MarginContainer.new()
+	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.add_theme_constant_override("margin_right", 12)
 	right.add_child(v)
 	row.add_child(right)
@@ -626,11 +641,17 @@ func info_row(card_box: VBoxContainer, label_text: String, value: String) -> HBo
 
 # Update the value of an info row created earlier.
 func set_info_value(row: HBoxContainer, value: String) -> void:
-	if row.get_child_count() >= 3:
-		var label: Label = row.get_child(2).get_child(0) as Label
-		if label:
-			label.text = value
-			label.add_theme_color_override("font_color", _muted())
+	if row.get_child_count() < 2:
+		return
+	var right := row.get_child(1) as MarginContainer
+	if right == null or right.get_child_count() == 0:
+		return
+	var label := right.get_child(0) as Label
+	if label == null:
+		return
+	label.text = value
+	label.tooltip_text = value
+	label.add_theme_color_override("font_color", _muted())
 
 
 # A muted, non-interactive row with an icon — the standard empty/error state
@@ -685,6 +706,7 @@ func info_tiles(tiles: Array) -> Array:
 		var value := Label.new()
 		value.text = str(tile.get("value", ""))
 		value.add_theme_font_size_override("font_size", 20)
+		_trim_label(value)
 		box.add_child(value)
 		value_labels.append(value)
 
@@ -692,6 +714,7 @@ func info_tiles(tiles: Array) -> Array:
 		cap.text = str(tile.get("label", ""))
 		cap.add_theme_font_size_override("font_size", 12)
 		cap.add_theme_color_override("font_color", _muted())
+		_trim_label(cap)
 		box.add_child(cap)
 
 	return value_labels

@@ -33,6 +33,9 @@ func build() -> void:
 	c.add_child(_list)
 
 	_status = Label.new()
+	# Status lines carry runtime text (app names, tool errors); wrap so a
+	# long message cannot push the card wider than the window.
+	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.add_theme_color_override("font_color", _muted())
 	c.add_child(_status)
 

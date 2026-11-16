@@ -51,6 +51,9 @@ func build() -> void:
 
 	_status = Label.new()
 	_status.text = "Loading services…"
+	# Status lines carry runtime text (unit names, tool errors); wrap so a
+	# long message cannot push the card wider than the window.
+	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.add_theme_color_override("font_color", _muted())
 	c.add_child(_status)
 

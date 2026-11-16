@@ -73,6 +73,8 @@ func _build_ui() -> void:
 	var status_label := Label.new()
 	status_label.name = "status_label"
 	status_label.text = "No VPN selected"
+	# Profile names get long; wrap instead of widening the page.
+	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	c.add_child(status_label)
 	_status_label = status_label

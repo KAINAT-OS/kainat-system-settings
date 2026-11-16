@@ -71,12 +71,15 @@ func _build_disk_card(dev: Dictionary) -> void:
 	
 	var name_label := Label.new()
 	name_label.text = "/dev/" + name + "  (" + size + ")"
-	name_label.add_theme_constant_override("autowrap_mode", TextServer.AUTOWRAP_WORD_SMART)
+	# Wrapping is a Label property, not a theme constant: a long device name
+	# has to reflow instead of widening the card past the window.
+	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	title_vbox.add_child(name_label)
 	
 	if not mountpoint.is_empty():
 		var mount_label := Label.new()
 		mount_label.text = "Mounted at: " + mountpoint
+		mount_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		mount_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
 		mount_label.add_theme_font_size_override("font_size", 12)
 		title_vbox.add_child(mount_label)
@@ -92,6 +95,7 @@ func _build_disk_card(dev: Dictionary) -> void:
 			bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			var usage_text := Label.new()
 			usage_text.text = "Usage: %s / %s (%d%%)" % [str(usage["used"]), str(usage["total"]), percent]
+			usage_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			title_vbox.add_child(usage_text)
 			title_vbox.add_child(bar)
 	
